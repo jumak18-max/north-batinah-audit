@@ -101,12 +101,44 @@ function cleanInstitutionName(raw:string, wilayat?:string):string{
 function stripProcedurePrefix(name:string){ return name.replace(/^\[(LR|RMC)\]\s*/i,"").trim(); }
 
 // --- API with cache busting to avoid CDN caching in shared link ---
+// Vercel fix (minimal): the records API only exists on the Meta deployment.
+// On Vercel it returns 404 / fails. Never let that block login or show a
+// "Request failed (404)" error. Fall back to an in-memory store for this
+// session only (no browser storage) so the app keeps working with
+// DEFAULT_USERS, default plans/institutions and in-memory scores.
+// When the records API is available, it is used as before.
+function __isVercelHost(){ try{ return typeof window!=="undefined" && window.location.hostname.includes("vercel.app"); }catch{ return false; } }
+let __inMemoryMode = false;
+const __memStore = new Map<string, any[]>();
+function __memId(){ return `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`; }
+function __memHandle(action:string, args:any){
+  const coll = args?.collection || "";
+  if(action==="records.list"){ const recs = __memStore.get(coll) || []; return {records: recs.map((r:any)=>({id:r.id, value:r.value})), next_cursor: null}; }
+  if(action==="records.create"){ const rec = {id: __memId(), value: args?.value || {}}; const arr = __memStore.get(coll) || []; arr.push(rec); __memStore.set(coll, arr); return rec; }
+  if(action==="records.replace"){ const arr = __memStore.get(coll) || []; const idx = arr.findIndex((r:any)=>r.id===args?.id); if(idx>=0) arr[idx]={id:args.id, value:args?.value||{}}; else arr.push({id:args?.id||__memId(), value:args?.value||{}}); __memStore.set(coll, arr); return arr.find((r:any)=>r.id===args?.id) || null; }
+  if(action==="records.delete"){ const arr = __memStore.get(coll) || []; __memStore.set(coll, arr.filter((r:any)=>r.id!==args?.id)); return true; }
+  throw new Error("Unsupported action in local mode");
+}
+function __shouldFallbackToMemory(resStatus:number|null, err:any){
+  if(resStatus===404) return true;
+  if(err && (err.name==="AbortError" || err.name==="TypeError")) return true;
+  return false;
+}
 async function api(action:string, args:any){
   const bust = Date.now() + Math.random();
-  const res = await fetch("actions", {method:"POST", cache:"no-store", headers:{"content-type":"application/json", "x-cache-bust": String(bust)}, body: JSON.stringify({action, args, _t:bust})});
-  const json = await res.json().catch(()=>({}));
-  if(!res.ok || json.error) throw new Error(json.error || `Request failed (${res.status})`);
-  return json.data;
+  const ctrl = new AbortController(); const timer=setTimeout(()=>ctrl.abort(), 8000);
+  try{
+    const res = await fetch("actions", {method:"POST", cache:"no-store", headers:{"content-type":"application/json", "x-cache-bust": String(bust)}, body: JSON.stringify({action, args, _t:bust}), signal: ctrl.signal});
+    const json = await res.json().catch(()=>({}));
+    if(!res.ok || json.error){
+      if(__shouldFallbackToMemory(res.ok?null:res.status, null)){ __inMemoryMode = true; return __memHandle(action, args); }
+      throw new Error(json.error || `Request failed (${res.status})`);
+    }
+    return json.data;
+  }catch(e:any){
+    if(__shouldFallbackToMemory(null, e)){ __inMemoryMode = true; return __memHandle(action, args); }
+    throw e;
+  } finally { clearTimeout(timer); }
 }
 async function apiTimed(action:string, args:any, timeoutMs:number){
   const bust = Date.now() + Math.random();
@@ -114,9 +146,12 @@ async function apiTimed(action:string, args:any, timeoutMs:number){
   try{
     const res = await fetch("actions", {method:"POST", cache:"no-store", headers:{"content-type":"application/json", "x-cache-bust": String(bust)}, body: JSON.stringify({action, args, _t:bust}), signal: ctrl.signal});
     const json = await res.json().catch(()=>({}));
-    if(!res.ok || json.error) throw new Error(json.error || `Request failed (${res.status})`);
+    if(!res.ok || json.error){
+      if(__shouldFallbackToMemory(res.ok?null:res.status, null)){ __inMemoryMode = true; return __memHandle(action, args); }
+      throw new Error(json.error || `Request failed (${res.status})`);
+    }
     return json.data;
-  }catch(e:any){ if(e?.name==="AbortError") throw new Error(`Request timed out after ${timeoutMs}ms`); throw e; } finally { clearTimeout(timer); }
+  }catch(e:any){ if(__shouldFallbackToMemory(null, e)){ __inMemoryMode = true; return __memHandle(action, args); } if(e?.name==="AbortError") throw new Error(`Request timed out after ${timeoutMs}ms`); throw e; } finally { clearTimeout(timer); }
 }
 const RECORD_COLLECTIONS = ["audit_plans","audit_scores","audit_passwords","competency_plans","competency_scores","audit_institutions","audit_procedures","audit_auditor_names","audit_security","audit_login_attempts"] as const;
 type FetchedBundle = { plans:Plan[]; scores:Score[]; overrides:PwdOverride[]; compPlans:CompPlan[]; compScores:CompScore[]; instOverrides:InstOverride[]; procOverrides:ProcOverride[]; auditorProfiles:AuditorProfile[]; security:SecuritySettings; securityId:string; loginAttempts:LoginAttempt[]; totalRecords:number };
@@ -1618,9 +1653,8 @@ Tips:
   // Detect shared vs local preview for footer indicator — now aware of Supabase vs records API
   const dbMode = useMemo(()=>{
     try {
-      // If Supabase env vars are present, show Supabase mode
+      if(__isVercelHost()) return "Local mode — data stays in this session";
       if (isSupabaseConfigured) return getDataSourceLabel();
-      // Fallback to existing logic for preview/records API
       if(typeof window==="undefined") return getDataSourceLabel();
       const prot = window.location.protocol;
       if(prot==="https:" || prot==="http:") return getDataSourceLabel();
@@ -1686,8 +1720,9 @@ Tips:
                 </div>
                 {!security.showDemoPasswords && <p className="mt-2 text-xs text-[var(--muted)]">Production mode — passwords are hidden. Tap an account to fill username, then enter your password. Master/Admin: keep password private.</p>}
               </div>
-              {backendError && <p className="mt-4 rounded-lg bg-amber-100 p-3 text-sm text-amber-900">{backendError}</p>}
-              {initialLoadError && !initialLoadDone && <div className="mt-4 rounded-lg bg-amber-100 p-3 text-sm text-amber-900"><p>Could not load data: {initialLoadError}</p><button onClick={()=>loadOnceRef.current()} disabled={loading} className="mt-2 rounded-lg bg-[var(--teal)] px-3 py-1.5 text-sm font-bold text-white disabled:opacity-60">{loading?"Loading...":"Retry"}</button></div>}
+              {__isVercelHost() && <p className="mt-4 rounded-lg bg-[var(--surface2)] p-3 text-sm font-semibold">Local mode — data stays in this session</p>}
+              {!__isVercelHost() && backendError && <p className="mt-4 rounded-lg bg-amber-100 p-3 text-sm text-amber-900">{backendError}</p>}
+              {!__isVercelHost() && initialLoadError && !initialLoadDone && <div className="mt-4 rounded-lg bg-amber-100 p-3 text-sm text-amber-900"><p>Could not load data. Please try again.</p><button onClick={()=>loadOnceRef.current()} disabled={loading} className="mt-2 rounded-lg bg-[var(--teal)] px-3 py-1.5 text-sm font-bold text-white disabled:opacity-60">{loading?"Loading...":"Retry"}</button></div>}
               <p className="mt-4 text-xs leading-relaxed text-[var(--muted)]">Demo accounts are for this preview. Wilayat users only see their own Wilayat. Admin sees all Wilayats and can manage plans and Wilayat passwords. Master sees all and controls access. {dbMode}</p>
             </div>
           </div>
@@ -1730,10 +1765,10 @@ Tips:
 
     <main className="mx-auto max-w-[1500px] px-3 py-4 pb-36 sm:px-5 sm:py-6 sm:pb-6">
       {!initialLoadDone && loading && <div className="card p-8 text-center"><div className="mx-auto flex flex-col items-center gap-3"><RefreshCw size={28} className="animate-spin text-[var(--teal)]"/><p className="text-lg font-black">Loading data from shared database...</p><p className="text-sm text-[var(--muted)]">Fetching plans, scores and institutions from database (cache-busted). {dbMode}</p></div></div>}
-      {!initialLoadDone && !loading && initialLoadError && <div className="card p-6 text-center"><p className="font-black text-amber-900">Could not load data</p><p className="mt-1 text-sm text-[var(--muted)]">{initialLoadError}</p><button onClick={()=>loadOnceRef.current()} className="mt-4 rounded-lg bg-[var(--teal)] px-4 py-2 font-bold text-white">Retry</button><p className="mt-2 text-xs text-[var(--muted)]">Grid is hidden until data loads — retry keeps last good data. {dbMode}</p></div>}
+      {!initialLoadDone && !loading && initialLoadError && !__isVercelHost() && <div className="card p-6 text-center"><p className="font-black text-amber-900">Could not load data</p><p className="mt-1 text-sm text-[var(--muted)]">Please try again.</p><button onClick={()=>loadOnceRef.current()} className="mt-4 rounded-lg bg-[var(--teal)] px-4 py-2 font-bold text-white">Retry</button><p className="mt-2 text-xs text-[var(--muted)]">Grid is hidden until data loads — retry keeps last good data. {dbMode}</p></div>}
 
       {liveToast && <div role="status" className="mb-4 flex items-start justify-between gap-2 rounded-xl border border-[var(--teal)] bg-[var(--surface)] p-3 text-sm font-bold shadow"><span>{liveToast}</span><button type="button" onClick={()=>setLiveToast(null)} aria-label="Dismiss notification" className="shrink-0 rounded-full border px-2 py-0.5 text-xs">Dismiss</button></div>}
-      {backendError && initialLoadDone && <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><AlertTriangle className="mr-1 inline" size={16}/> {backendError} Showing last saved data. {dbMode}</div>}
+      {backendError && initialLoadDone && !__isVercelHost() && <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><AlertTriangle className="mr-1 inline" size={16}/> {backendError} Showing last saved data. {dbMode}</div>}
       {saveMsg && <div className="mb-4 rounded-xl bg-[var(--surface2)] p-3 text-sm font-semibold">{saveMsg}</div>}
       {result && <div className="mb-4 rounded-xl border p-3 text-sm"><strong>Demo load:</strong> saved {result.saved}, remaining {result.remaining}. {result.error?`Storage error: ${result.error}`:""} {result.reloadError?`Reload error: ${result.reloadError}`:""}</div>}
 

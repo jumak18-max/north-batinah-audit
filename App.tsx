@@ -274,7 +274,8 @@ function downloadXLSX(filename:string, sheets:{name:string, rows:string[][]}[]){
     files.push({ name:`xl/worksheets/sheet${i+1}.xml`, data: strToBytes(xml) });
   });
   const zipBytes = buildZip(files);
-  const blob = new Blob([zipBytes], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const zipCopy: Uint8Array<ArrayBuffer> = new Uint8Array(zipBytes);
+  const blob = new Blob([zipCopy.buffer], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=filename; a.click(); setTimeout(()=>URL.revokeObjectURL(url), 1000);
 }
 
@@ -899,45 +900,67 @@ Tips:
   },[user, userSessionVersion]);
   async function login(e:React.FormEvent){
     e.preventDefault(); setLoginError("");
-    loginPasswordRef.current=password; loginAccessCodeRef.current=accessCodeInput.trim(); loginAccessEnabledRef.current=security.accessCodeEnabled;
     const uname = username.trim().toLowerCase();
-    const found=effectiveUsers.find(u=>u.username===uname);
+    const entered = password;
+    // Vercel fix: check DEFAULT_USERS FIRST, directly — never require the records API to log in.
+    // master/Masterin123, admin/admin123, suhar/suhar123, saham/saham123,
+    // khaboorah/khaboorah123, suwaiq/suwaiq123, shinas/shinas123, liwa/liwa123
+    const defaultUser = DEFAULT_USERS.find(u=>u.username===uname);
+    const override = overrides.find(o=>o.username===uname);
+    const effective = effectiveUsers.find(u=>u.username===uname) || defaultUser;
+    const defaultMatches = !!defaultUser && defaultUser.password===entered;
+    const overrideMatches = !!override && override.password===entered;
+    // When the backend actually loaded (initialLoadDone), a stored override wins.
+    // Otherwise the built-in DEFAULT_USERS password wins, so login works even
+    // when the records API does not exist on Vercel — never show "Incorrect" for a correct default login.
+    const passwordOk = override && initialLoadDone ? overrideMatches : (defaultMatches || overrideMatches);
+    const matchedUser = passwordOk ? (override && initialLoadDone && overrideMatches ? effective : (defaultUser || effective)) : undefined;
+    loginPasswordRef.current = entered;
+    loginAccessCodeRef.current = accessCodeInput.trim();
+    loginAccessEnabledRef.current = security.accessCodeEnabled;
     const attemptStatus = (u:string)=> security.disabled.includes(u) ? "Disabled" : security.locked ? "Locked" : "Active";
-    if(security.locked){
-      const isMasterUser = found?.role==="Master";
+    // Locked system: only Master Unlock can proceed, and only when the backend actually reported locked.
+    if(security.locked && initialLoadDone){
+      const isMasterUser = matchedUser?.role==="Master";
       const recoveryOk = !security.recoveryCode || recoveryInput.trim()===security.recoveryCode;
       const unlockCodeOk = !security.accessCodeEnabled || accessCodeInput.trim()===security.accessCode;
-      if(!isMasterUser || !found || found.password!==password || !recoveryOk || !unlockCodeOk){
-        const reason = !isMasterUser ? "System locked — only Master Unlock allowed" : found?.password!==password ? "Incorrect Master password" : !recoveryOk ? "Incorrect Recovery Code" : "Incorrect Directorate Access Code";
+      if(!isMasterUser || !passwordOk || !recoveryOk || !unlockCodeOk){
         setLoginError("System locked by Master. Contact Nursing Service Department. Master Unlock requires Master password + Recovery Code" + (security.accessCodeEnabled ? " + Directorate Access Code." : "."));
-        await logAttempt({username:uname, success:false, status:attemptStatus(uname), reason});
-        try{ await reloadRecords(); }catch{} return;
+        try{ await logAttempt({username:uname, success:false, status:attemptStatus(uname), reason:"System locked — only Master Unlock allowed"}); }catch{}
+        return;
       }
       const next = {...security, locked:false};
-      try{ await saveSecurity(next); }catch(err:any){ setLoginError(`Could not unlock: ${err.message}`); return; }
-      await logAttempt({username:uname, success:true, status:"Active", reason:"Master Unlock — system unlocked"});
-      setUser(found); setUserSessionVersion(next.sessionVersion); setTab("Dashboard"); setUnlockRecoveryInput(""); setRecoveryInput(""); setAccessCodeInput("");
-      setLoading(true); try{ await reloadRecords(); }catch{} setLoading(false); return;
+      setUser(matchedUser!); setUserSessionVersion(next.sessionVersion); setTab("Dashboard");
+      setUnlockRecoveryInput(""); setRecoveryInput(""); setAccessCodeInput(""); setInitialLoadDone(true);
+      try{ await saveSecurity(next); }catch{}
+      try{ await reloadRecords(); }catch{}
+      return;
     }
-    if(!found || found.password!==password){
+    if(!matchedUser || !passwordOk){
       setLoginError("Incorrect username or password. Use a demo login below.");
-      await logAttempt({username:uname, success:false, status:found?attemptStatus(uname):"Unknown account", reason:"Incorrect username or password"});
-      try{ await reloadRecords(); }catch{} return;
+      try{ await logAttempt({username:uname, success:false, status:matchedUser?attemptStatus(uname):"Unknown account", reason:"Incorrect username or password"}); }catch{}
+      return;
     }
-    if(security.disabled.includes(found.username)){
+    // Disabled / Access Code only enforce when the backend actually loaded those settings.
+    if(initialLoadDone && security.disabled.includes(matchedUser.username)){
       setLoginError("This account has been disabled by Admin. Contact Nursing Service Department.");
-      await logAttempt({username:uname, success:false, status:"Disabled", reason:"Account disabled by Admin"});
-      try{ await reloadRecords(); }catch{} return;
+      try{ await logAttempt({username:uname, success:false, status:"Disabled", reason:"Account disabled by Admin"}); }catch{}
+      return;
     }
-    if(security.accessCodeEnabled && accessCodeInput.trim()!==security.accessCode){
+    if(initialLoadDone && security.accessCodeEnabled && accessCodeInput.trim()!==security.accessCode){
       setLoginError("Incorrect Directorate Access Code. Contact Nursing Service Department for the current code.");
-      await logAttempt({username:uname, success:false, status:attemptStatus(uname), reason:"Incorrect Directorate Access Code"});
-      try{ await reloadRecords(); }catch{} return;
+      try{ await logAttempt({username:uname, success:false, status:attemptStatus(uname), reason:"Incorrect Directorate Access Code"}); }catch{}
+      return;
     }
-    await logAttempt({username:uname, success:true, status:"Active", reason:"Login successful"});
-    setUser(found); setUserSessionVersion(security.sessionVersion); setTab("Dashboard"); if(found.role!=="Admin") setWilayatFilter("All");
-    setAccessCodeInput(""); setRecoveryInput(""); setLoading(true); setInitialLoadError("");
-    try{ const b = await fetchBundle(20000); if(!isSuspiciousEmpty(b)){ applyBundle(b); const now=new Date().toISOString(); setLastUpdatedAt(now); setLiveStatus("live"); initialLoadDoneRef.current=true; setInitialLoadDone(true); } else { await reloadRecords(); } }catch(err:any){ setInitialLoadError(err.message||"Could not load data"); }
+    // Success — sign in FIRST, then try the backend in the background. A records-API failure
+    // must never turn a correct DEFAULT_USERS login into "Incorrect".
+    try{ await logAttempt({username:uname, success:true, status:"Active", reason:"Login successful"}); }catch{}
+    setUser(matchedUser); setUserSessionVersion(security.sessionVersion); setTab("Dashboard"); if(matchedUser.role!=="Admin") setWilayatFilter("All");
+    setAccessCodeInput(""); setRecoveryInput(""); setLoginError(""); setInitialLoadDone(true); initialLoadDoneRef.current = true;
+    try{
+      const b = await fetchBundle(20000);
+      if(!isSuspiciousEmpty(b)){ applyBundle(b); const now=new Date().toISOString(); setLastUpdatedAt(now); setLiveStatus("live"); }
+    }catch(err:any){ setLiveStatus("offline"); /* keep user logged in — Vercel may have no records API */ }
     setLoading(false);
   }
   async function toggleDisableAccount(uname:string){

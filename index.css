@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root{
+  --bg:#eef4f4;
+  --surface:#ffffff;
+  --surface2:#e8f2f1;
+  --ink:#102a2c;
+  --muted:#60787a;
+  --line:#cbdcd9;
+  --teal:#0d6e6b;
+  --teal2:#0a4f4d;
+  --blue:#1666a8;
+  --amber:#fff3c9;
+  --green:#d8f2d9;
+  --red:#ffe0dd;
+  --gold:#d99a16;
+  --highlight:#ffe066;
+  --highlight-border:#d99a16;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0d1d1e; --surface:#152b2c; --surface2:#1c3a3b; --ink:#eef7f6; --muted:#a9c0be; --line:#2f4e4e; --teal:#37b3aa; --teal2:#8ce0da; --blue:#6fb7f0; --amber:#4a3a12; --green:#1d4025; --red:#4a231f; --gold:#f1c65b; --highlight:#7a5a00; --highlight-border:#f1c65b; }
+}
+*{box-sizing:border-box}
+html,body{overflow-x:clip}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;font-size:16px;line-height:1.45}
+button,input,select,textarea{font:inherit}
+button{cursor:pointer;min-height:44px}
+input,select,textarea{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:.65rem .7rem;outline:none;min-height:44px;font-size:16px}
+input:focus,select:focus,textarea:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(13,110,107,.14)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:0 4px 18px rgba(10,50,48,.06)}
+.chip{border-radius:999px;padding:.2rem .6rem;font-size:.78rem;font-weight:700}
+.gridwrap{overflow:auto;max-height:640px;border:1px solid var(--line);border-radius:12px;background:var(--surface);-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+table.excel{border-collapse:separate;border-spacing:0;min-width:1080px;width:100%}
+table.excel th,table.excel td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:.5rem .55rem;text-align:center;white-space:nowrap;font-size:14px}
+table.excel th{background:#e9f1f0;color:#173b3a;position:sticky;top:0;z-index:3}
+table.excel td:first-child,table.excel th:first-child{position:sticky;left:0;z-index:4;background:var(--surface);text-align:left;min-width:240px}
+table.excel th:first-child{z-index:5}
+.cellBtn{width:100%;min-height:34px;border:0;background:transparent;color:inherit;font-weight:600;position:relative}
+table.excel tr.editing-row td{background:var(--highlight)!important;color:#102a2c}
+table.excel tr.editing-row td:first-child{box-shadow:inset 6px 0 0 var(--highlight-border)}
+table.excel tr.editing-row td.editing-cell{outline:3px solid var(--teal);outline-offset:-3px;position:relative;z-index:2}
+@media (prefers-color-scheme: dark){ table.excel tr.editing-row td{color:#fff7d6} table.excel tr.editing-row td.editing-cell{outline-color:#8ce0da} }
+.hasComment:after{content:"";position:absolute;right:2px;top:2px;border-left:7px solid transparent;border-bottom:7px solid transparent;border-right:7px solid #d32f2f;border-top:7px solid #d32f2f}
+@media print{ .noprint{display:none!important} }
+
+/* ---- Mobile-first ---- */
+.no-scrollbar::-webkit-scrollbar{display:none}
+.no-scrollbar{scrollbar-width:none}
+@keyframes sheet-up{from{transform:translateY(24px);opacity:.6}to{transform:translateY(0);opacity:1}}
+.sheet-up{animation:sheet-up .22s ease-out}
+@keyframes fade-in{from{opacity:0}to{opacity:1}}
+.fade-in{animation:fade-in .18s ease-out}
+
+@media (max-width:639px){
+  body{font-size:16px}
+  /* Touch targets & readable text on phone */
+  button{ min-height:44px }
+  input,select,textarea{font-size:16px;min-height:48px}
+  table.excel th,table.excel td{font-size:13px;padding:.65rem .55rem}
+  table.excel td:first-child,table.excel th:first-child{min-width:170px;max-width:190px;white-space:normal;overflow-wrap:anywhere}
+  .cellBtn{min-height:48px;font-size:14px;padding:.35rem .25rem}
+  /* Grid: own scroller, sticky first column + header */
+  .gridwrap{max-height:62vh;border-radius:10px}
+  table.excel{min-width:720px}
+  /* Single-month list rows */
+  .single-month-row{min-height:64px}
+  .single-month-cell{min-height:52px;min-width:92px}
+  /* Cards / sections stack (Tailwind lg: grids already stack, this tightens spacing) */
+  .card{border-radius:12px}
+  /* Bottom nav offset is handled in App via main padding */
+}
+@media (max-width:380px){
+  table.excel td:first-child,table.excel th:first-child{min-width:140px;max-width:160px}
+}
+@media (orientation:landscape) and (max-height:500px){
+  .gridwrap{max-height:58vh}
+  .cellBtn{min-height:44px}
+}
+@media (min-width:640px) and (max-width:1024px){
+  .gridwrap{max-height:70vh}
+  table.excel{min-width:900px}
+  .cellBtn{min-height:44px}
+}

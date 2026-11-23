@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { BarChart3, ClipboardCheck, Download, LogOut, MessageSquare, Search, Settings2, Users, HelpCircle, Plus, Trash2, X, CheckCircle2, AlertTriangle, ChevronDown, Eye, EyeOff, History, Filter, RefreshCw } from "lucide-react";
-import mohLogo from "container:///mnt/data/src/assets/de5a2654c982994c-MOH_Logo.png";
+import mohLogo from "./assets/de5a2654c982994c-MOH_Logo.png";
 import { isSupabaseConfigured, supabase, getDataSourceLabel } from "./supabaseClient";
 // TODO (Supabase migration): When VITE_SUPABASE_* env vars are present, replace api("records.*") calls below
 // with supabase.from("plans"/"scores"/etc).select/insert/update/delete — see supabaseClient.ts and README.md for mapping.

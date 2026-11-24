@@ -544,9 +544,12 @@ export default function App() {
     });
   }, [category, user, wilayatFilter, search, effComp]);
 
-  const planScores = useMemo(() => activePlan ? scores.filter(s => s.planId === activePlan.id) : [], [scores, activePlan]);
+  // V3: filter by topic, NOT planId — Saham and Admin can load different copies
+  // of the same plan with different ids. Filtering by planId hid Saham scores from Admin.
+  const planScores = useMemo(() => activePlan ? scores.filter(s => (s.topic || '') === (activePlan.topic || '') && (!s.year || !activePlan.year || s.year === activePlan.year)) : [], [scores, activePlan]);
   const findScore = (w: string, inst: string, period: string) => planScores.find(s => s.wilayat === w && s.institution === inst && s.period === period);
-  const compPlanScores = useMemo(() => activeCompPlan ? compScores.filter(s => s.planId === activeCompPlan.id) : [], [compScores, activeCompPlan]);
+  // V3: same fix for Part 2 — filter by category, not planId.
+  const compPlanScores = useMemo(() => activeCompPlan ? compScores.filter(s => (s.category || '') === (activeCompPlan.category || '') && (!s.year || !activeCompPlan.year || s.year === activeCompPlan.year)) : [], [compScores, activeCompPlan]);
   const findCompScore = (w: string, inst: string, period: string) => compPlanScores.find(s => s.wilayat === w && s.institution === inst && s.period === period);
   const activeBlocks = useMemo(() => getBlocks(activeCompPlan), [activeCompPlan]);
   const findBlockScore = (w: string, inst: string, block: Block): CompScore | undefined => {

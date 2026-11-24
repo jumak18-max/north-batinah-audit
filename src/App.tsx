@@ -407,8 +407,8 @@ export default function App() {
     const dedupedScores = dedupBy(newScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
     const dedupedCompPlans = dedupBy(newCompPlans, (p) => `${p.category}||${p.year}`);
     const dedupedCompScores = dedupBy(newCompScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
-    // MERGE, never replace: a fetch that runs 3s after a save may not yet
-    // include that just-saved row. Replacing would delete it from the screen.
+    // MERGE, never replace: a fetch that runs seconds after a save may not yet
+    // include that just-saved row. Replacing would wipe it from the screen.
     // Merge keeps local scores not yet in Supabase, Supabase wins on conflict.
     if (dedupedPlans.length) setPlans(prev => { const m = new Map(prev.map(x => [`${x.topic}||${x.year}`, x])); dedupedPlans.forEach(x => m.set(`${x.topic}||${x.year}`, x)); return [...m.values()]; });
     if (dedupedScores.length) setScores(prev => { const m = new Map(prev.map(x => [`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x])); dedupedScores.forEach(x => m.set(`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x)); return [...m.values()]; });
@@ -461,7 +461,7 @@ export default function App() {
       const ap = byIdx(7).map((r: any) => ({ id: r.id, ...r.value }));
       const secRec = byIdx(8)[0]; const sec = secRec ? { ...DEFAULT_SECURITY, ...secRec.value, disabled: Array.isArray(secRec.value?.disabled) ? secRec.value.disabled : [] } : DEFAULT_SECURITY;
       const att = byIdx(9).map((r: any) => ({ id: r.id, ...r.value })).sort((a: any, b: any) => new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime());
-      if (p.length) setPlans(p); if (s.length) setScores(s); if (o.length) setOverrides(o); if (cp.length) setCompPlans(cp); if (cs.length) setCompScores(cs); if (io.length) setInstOverrides(io); if (po.length) setProcOverrides(po); if (ap.length) setAuditorProfiles(ap); setSecurity(sec); setSecurityId(secRec ? secRec.id : ""); setLoginAttempts(att);
+      if (p.length) setPlans(prev => { const m = new Map(prev.map((x:any)=>[`${x.topic}||${x.year}`, x])); p.forEach((x:any)=>m.set(`${x.topic}||${x.year}`, x)); return [...m.values()]; }); if (s.length) setScores(prev => { const m = new Map(prev.map((x:any)=>[`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x])); s.forEach((x:any)=>m.set(`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x)); return [...m.values()]; }); if (o.length) setOverrides(o); if (cp.length) setCompPlans(cp); if (cs.length) setCompScores(cs); if (io.length) setInstOverrides(io); if (po.length) setProcOverrides(po); if (ap.length) setAuditorProfiles(ap); setSecurity(sec); setSecurityId(secRec ? secRec.id : ""); setLoginAttempts(att);
       const now = new Date().toISOString(); setLastUpdatedAt(now); setLiveStatus("live");
       saveLocalBackup({ plans: p.length ? p : plans, scores: s.length ? s : scores, compPlans: cp.length ? cp : compPlans, compScores: cs.length ? cs : compScores, instOverrides: io, procOverrides: po, overrides: o, auditorProfiles: ap, security: sec });
       return true;
@@ -486,11 +486,13 @@ export default function App() {
   // Skipped while a score sheet is open or a save is in flight so an
   // in-progress edit is not overwritten by incoming data.
   const reloadRef = React.useRef(reloadRecords);
+  const lastSaveAtRef = React.useRef(0);
   useEffect(() => { reloadRef.current = reloadRecords; });
   useEffect(() => {
     if (!user) return;
     const timer = setInterval(async () => {
       if (selectedCell || busy) return;
+      if (Date.now() - lastSaveAtRef.current < 20000) return;
       try { await reloadRef.current(); } catch { /* status already set to offline by reloadRecords */ }
     }, 10000);
     return () => clearInterval(timer);
@@ -598,7 +600,7 @@ export default function App() {
     const nameVal = auditorNameInput.trim();
     if (!isScoreValid(scoreInput)) { setSaveMsg("Score is mandatory: enter 0–100 or NA."); return; }
     if (!isNameValid(auditorNameInput)) { setSaveMsg("Auditor Name is mandatory: enter at least 2 characters."); return; }
-    setBusy(true); setSaveMsg("");
+    setBusy(true); setSaveMsg(""); lastSaveAtRef.current = Date.now();
     const nowIso = new Date().toISOString();
     if (selectedCell.part === "2") {
       if (!activeCompPlan) { setBusy(false); return; }

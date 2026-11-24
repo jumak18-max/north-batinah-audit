@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { BarChart3, ClipboardCheck, Download, LogOut, MessageSquare, Search, Settings2, Users, HelpCircle, X, CheckCircle2, ChevronDown, Eye, EyeOff, History, Filter, RefreshCw, Trash2 } from "lucide-react";
+import { BarChart3, ClipboardCheck, Download, LogOut, MessageSquare, Search, Settings2, Users, HelpCircle, X, CheckCircle2, Eye, EyeOff, Trash2, RefreshCw } from "lucide-react";
 import mohLogo from "../assets/de5a2654c982994c-MOH_Logo.png";
-import { isSupabaseConfigured, supabase, supabaseLoadAll, supabaseUpsert, supabaseDelete, getDataSourceLabel } from "./supabaseClient";
+import { isSupabaseConfigured, supabaseLoadAll, supabaseUpsert, supabaseDelete, sbSave, sbLoadAll } from "./supabaseClient";
 
 type Role = "Master" | "Admin" | "Wilayat";
 type User = { username: string; password: string; role: Role; wilayat: string; label: string };
@@ -91,7 +91,6 @@ function scoreColor(s: string) {
 function procTag(p: string) { if (p.startsWith("[LR]")) return "LR"; if (p.startsWith("[RMC]")) return "RMC"; return "General"; }
 function stripProcedurePrefix(name: string) { return name.replace(/^\[(LR|RMC)\]\s*/i, "").trim(); }
 
-// XLSX generator (same as before)
 function xmlEscape(s: string) { return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;"); }
 function colLetter(idx: number) { let n = idx; let s = ""; while (n >= 0) { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } return s; }
 function isNumericCell(v: string) { if (v === "" || v === null || v === undefined) return false; const t = String(v).trim().toUpperCase(); if (t === "NA" || t === "") return false; const num = Number(t); return !isNaN(num) && isFinite(num); }
@@ -162,7 +161,6 @@ function downloadXLSX(filename: string, sheets: { name: string, rows: string[][]
   const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// ---------- default data ----------
 const DEFAULT_PLANS: Plan[] = TOPICS.map(t => ({ id: `default-plan-${t}`, topic: t, year: 2027, frequency: "Monthly", periods: [...MONTHS], active: true }));
 const DEFAULT_COMP_PLANS: CompPlan[] = [
   { id: "default-comp-General Nursing", category: "General Nursing", year: 2027, frequency: "Monthly", periods: [...MONTHS], procedures: ["Neourological assessment", "Neourological assessment", "Neourological assessment", "Urinary Catheterization (Male)", "Urinary Catheterization (Male)", null, "IV Cannulation Insertion", "IV Cannulation Insertion", "IV Fluid Administration", "Cast Application (Plaster)", null, null], feedback: [false, false, false, false, false, true, false, false, false, false, false, false], active: true },
@@ -177,49 +175,39 @@ const DEFAULT_COMP_SCORES: CompScore[] = [
   { id: "default-comp-score-1", planId: "default-comp-General Nursing", wilayat: "Khaboorah", institution: "Khaboorah EHC", category: "General Nursing", year: 2027, period: "Jan", procedure: "Neourological assessment", score: "92", comment: "Good technique.", auditorName: "Salim Al Mamari", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
 ];
 
-// ---------- API fallback (records API) ----------
-let __inMemoryMode = false;
-const __memStore = new Map<string, any[]>();
-function __memId() { return `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`; }
-function __memHandle(action: string, args: any) {
-  const coll = args?.collection || "";
-  if (action === "records.list") { const recs = __memStore.get(coll) || []; return { records: recs.map((r: any) => ({ id: r.id, value: r.value })), next_cursor: null }; }
-  if (action === "records.create") { const rec = { id: __memId(), value: args?.value || {} }; const arr = __memStore.get(coll) || []; arr.push(rec); __memStore.set(coll, arr); return rec; }
-  if (action === "records.replace") { const arr = __memStore.get(coll) || []; const idx = arr.findIndex((r: any) => r.id === args?.id); if (idx >= 0) arr[idx] = { id: args.id, value: args?.value || {} }; else arr.push({ id: args?.id || __memId(), value: args?.value || {} }); __memStore.set(coll, arr); return arr.find((r: any) => r.id === args?.id) || null; }
-  if (action === "records.delete") { const arr = __memStore.get(coll) || []; __memStore.set(coll, arr.filter((r: any) => r.id !== args?.id)); return true; }
-  throw new Error("Unsupported action in local mode");
-}
-function __shouldFallbackToMemory(resStatus: number | null, err: any) { if (resStatus === 404) return true; if (err && (err.name === "AbortError" || err.name === "TypeError")) return true; return false; }
 async function api(action: string, args: any) {
-  const bust = Date.now() + Math.random();
   const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
-    const res = await fetch("actions", { method: "POST", cache: "no-store", headers: { "content-type": "application/json", "x-cache-bust": String(bust) }, body: JSON.stringify({ action, args, _t: bust }), signal: ctrl.signal });
+    const res = await fetch("actions", { method: "POST", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, args }), signal: ctrl.signal });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json.error) {
-      if (__shouldFallbackToMemory(res.ok ? null : res.status, null)) { __inMemoryMode = true; return __memHandle(action, args); }
       throw new Error(json.error || `Request failed (${res.status})`);
     }
     return json.data;
-  } catch (e: any) {
-    if (__shouldFallbackToMemory(null, e)) { __inMemoryMode = true; return __memHandle(action, args); }
-    throw e;
   } finally { clearTimeout(timer); }
 }
 
-// ---------- localStorage backup ----------
-const LS_KEY = "audit_backup_v2";
-function saveLocalBackup(state: any) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify({ ...state, _ts: new Date().toISOString() })); } catch {}
-}
-function loadLocalBackup(): any | null {
-  try { const raw = localStorage.getItem(LS_KEY); if (!raw) return null; return JSON.parse(raw); } catch { return null; }
-}
+// No browser fallback: a failed shared-backend write must
+// surface as an error, never look saved on one device only.
+function saveLocalBackup(_state: any) {}
+function loadLocalBackup(): any | null { return null; }
 
-// ---------- main App ----------
 export default function App() {
   useEffect(() => { document.title = "North Al Batinah — Nursing Audit System"; }, []);
-  const [user, setUser] = useState<User | null>(null);
+  // Login persistence: per-device localStorage (NOT Supabase).
+  // Supabase row "audit_current_user" was shared for everyone, so one
+  // device logging in overwrote another device's login. localStorage
+  // keeps Saham logged in on iPhone and Admin logged in on laptop.
+  // Only username + sessionVersion are saved, never a password.
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem('audit_current_user');
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      const found = DEFAULT_USERS.find(u => u.username === String(parsed.username || '').toLowerCase());
+      return found || null;
+    } catch { return null; }
+  });
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin123");
   const [loginError, setLoginError] = useState("");
@@ -276,13 +264,15 @@ export default function App() {
   const [liveToast, setLiveToast] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [securityMsg, setSecurityMsg] = useState("");
+  const [supabaseConnected, setSupabaseConnected] = useState(false);
+  const [supabaseReason, setSupabaseReason] = useState("");
+  const [syncRowsLoaded, setSyncRowsLoaded] = useState(0);
+  const [lastSyncAt, setLastSyncAt] = useState("");
   const [viewportWidth, setViewportWidth] = useState(typeof window !== "undefined" ? window.innerWidth : 1024);
   const [singleMonthView, setSingleMonthView] = useState(false);
   const [mobileMonthIdx, setMobileMonthIdx] = useState(() => new Date().getMonth());
   const gridRef = React.useRef<HTMLDivElement | null>(null);
-  const isMobile = viewportWidth < 640;
 
-  // Guide text
   const GUIDE_TEXT = `Wilayat Quick Guide — How to Enter Scores on Your Phone
 1. Open shared link, log in with Wilayat account (e.g. suhar / suhar123)
 2. Choose Part 1 or Part 2 at top
@@ -293,7 +283,6 @@ export default function App() {
 7. Tap Refresh at top to see latest scores from other Wilayats.
 8. Check Dashboard for completion %.`;
 
-  // responsive
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
@@ -352,16 +341,36 @@ export default function App() {
   }, [procOverrides]);
   const displayProcedure = (proc: string | null | undefined): string => { if (!proc) return "— Skipped —"; const exists = effectiveProcedures.some(p => p.toLowerCase() === proc.toLowerCase()); return exists ? proc : "(Removed procedure)"; };
 
-  // ---------- Supabase sync logic ----------
   const applySupabaseRows = (rows: any[]) => {
     if (!rows || rows.length === 0) return false;
+    // Merge rule: shared database wins. Sort oldest -> newest by updated_at
+    // so that when the same logical record exists twice (two devices saved
+    // the same cell), the newest copy is the one kept below.
+    const sortedRows = [...rows].sort((a: any, b: any) => {
+      const ta = a?.updated_at ? new Date(a.updated_at).getTime() : 0;
+      const tb = b?.updated_at ? new Date(b.updated_at).getTime() : 0;
+      return ta - tb;
+    });
+    rows = sortedRows;
     let hasData = false;
     const newPlans: Plan[] = []; const newScores: Score[] = []; const newCompPlans: CompPlan[] = []; const newCompScores: CompScore[] = [];
     const newInst: InstOverride[] = []; const newProc: ProcOverride[] = []; const newPwd: PwdOverride[] = []; const newAuditor: AuditorProfile[] = [];
     let newSecurity: SecuritySettings | null = null; let newSecId = ""; const newAttempts: LoginAttempt[] = [];
+    let sessionCandidate: { username: string; sessionVersion: number } | null = null;
     rows.forEach(r => {
       const id = r.id || ""; const d = r.data || {};
       try {
+        if (id === "audit_current_user" || id.startsWith("audit_session")) { /* IGNORED: login is per-device localStorage, shared row must never overwrite this device's login. */ return; }
+        // Aggregate rows: one row whose data is the whole collection.
+        if ((id === "audit_scores" || id === "audit_plans" || id === "audit_institutions" || id === "audit_procedures" || id === "audit_users") && Array.isArray(d)) {
+          hasData = true;
+          if (id === "audit_scores") d.forEach((item: any) => { if (item) newScores.push({ id: item.id || `agg-${Date.now()}-${Math.random()}`, planId: item.planId, wilayat: item.wilayat, institution: cleanInstitutionName(item.institution, item.wilayat), topic: item.topic, year: item.year, period: item.period, score: item.score, comment: item.comment, auditorName: item.auditorName, auditedAt: item.auditedAt, history: item.history || [] }); });
+          if (id === "audit_plans") d.forEach((item: any) => { if (item) newPlans.push({ id: item.id || `agg-plan-${Date.now()}`, topic: item.topic, year: item.year, frequency: item.frequency || "Monthly", periods: item.periods || [...MONTHS], active: !!item.active }); });
+          if (id === "audit_institutions") d.forEach((item: any) => { if (!item) return; if (item.kind) newInst.push({ id: item.id || `agg-inst-${Date.now()}-${Math.random()}`, kind: item.kind, wilayat: item.wilayat, name: item.name, assignments: item.assignments || [], originalWilayat: item.originalWilayat, originalName: item.originalName }); else newInst.push({ id: `agg-inst-${Date.now()}-${Math.random()}`, kind: "add", wilayat: item.wilayat, name: item.institution || item.name, assignments: item.assignments || ["Part 1"], originalWilayat: item.wilayat, originalName: item.institution || item.name }); });
+          if (id === "audit_procedures") d.forEach((item: any) => { if (!item) return; if (typeof item === "string") newProc.push({ id: `agg-proc-${Date.now()}-${Math.random()}`, kind: "add", name: item }); else if (item.kind) newProc.push({ id: item.id || `agg-proc-${Date.now()}-${Math.random()}`, kind: item.kind, name: item.name, originalName: item.originalName }); else newProc.push({ id: `agg-proc-${Date.now()}-${Math.random()}`, kind: "add", name: item.name }); });
+          if (id === "audit_users") d.forEach((item: any) => { if (item?.username && item?.password) newPwd.push({ id: item.id || `agg-user-${item.username}`, username: item.username, password: item.password }); });
+          return;
+        }
         if (id.startsWith("audit_plans_") || (d.topic && d.year)) { newPlans.push({ id: d.id || id, topic: d.topic, year: d.year, frequency: d.frequency || "Monthly", periods: d.periods || [...MONTHS], active: !!d.active }); hasData = true; }
         else if (id.startsWith("audit_scores_") || (d.wilayat && d.institution && d.period && d.topic)) { newScores.push({ id: d.id || id, planId: d.planId, wilayat: d.wilayat, institution: cleanInstitutionName(d.institution, d.wilayat), topic: d.topic, year: d.year, period: d.period, score: d.score, comment: d.comment, auditorName: d.auditorName, auditedAt: d.auditedAt, history: d.history || [] }); hasData = true; }
         else if (id.startsWith("competency_plans_") || (d.category && d.procedures)) { newCompPlans.push({ id: d.id || id, category: d.category, year: d.year, frequency: d.frequency || "Monthly", periods: d.periods || [...MONTHS], procedures: d.procedures || Array(12).fill(null), feedback: d.feedback || Array(12).fill(false), active: !!d.active }); hasData = true; }
@@ -374,10 +383,34 @@ export default function App() {
         else if (id.startsWith("audit_login_attempts_")) { newAttempts.push({ id: d.id || id, username: d.username, success: d.success, status: d.status, at: d.at, reason: d.reason }); }
       } catch {}
     });
-    if (newPlans.length) setPlans(newPlans);
-    if (newScores.length) setScores(newScores);
-    if (newCompPlans.length) setCompPlans(newCompPlans);
-    if (newCompScores.length) setCompScores(newCompScores);
+    // Restore a persisted login only on a fresh load (no user yet). The
+    // effective security + overrides from this same batch decide whether
+    // the saved session is still valid.
+    if (sessionCandidate && !user) {
+      const effSecurity = newSecurity || security;
+      const candidateUser = DEFAULT_USERS.find(u => u.username === sessionCandidate.username);
+      if (candidateUser && sessionCandidate.sessionVersion === effSecurity.sessionVersion && !effSecurity.disabled.includes(candidateUser.username) && !(effSecurity.locked && candidateUser.role !== "Master")) {
+        setUser(candidateUser);
+        setUserSessionVersion(sessionCandidate.sessionVersion);
+        setTab("Dashboard");
+      }
+    }
+    // De-duplicate by logical key, keeping the newest (last, after the
+    // updated_at sort above) so a second device's newer save wins over an
+    // older copy of the same cell / plan instead of showing both.
+    const dedupBy = <T,>(arr: T[], key: (v: T) => string): T[] => {
+      const m = new Map<string, T>();
+      arr.forEach((v) => m.set(key(v), v));
+      return [...m.values()];
+    };
+    const dedupedPlans = dedupBy(newPlans, (p) => `${p.topic}||${p.year}`);
+    const dedupedScores = dedupBy(newScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
+    const dedupedCompPlans = dedupBy(newCompPlans, (p) => `${p.category}||${p.year}`);
+    const dedupedCompScores = dedupBy(newCompScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
+    if (dedupedPlans.length) setPlans(dedupedPlans);
+    if (dedupedScores.length) setScores(dedupedScores);
+    if (dedupedCompPlans.length) setCompPlans(dedupedCompPlans);
+    if (dedupedCompScores.length) setCompScores(dedupedCompScores);
     if (newInst.length) setInstOverrides(newInst);
     if (newProc.length) setProcOverrides(newProc);
     if (newPwd.length) setOverrides(newPwd);
@@ -388,27 +421,29 @@ export default function App() {
   };
 
   const loadFromSupabase = async (): Promise<boolean> => {
-    if (!isSupabaseConfigured) return false;
+    if (!isSupabaseConfigured) { setSupabaseConnected(false); setSupabaseReason("no-config"); return false; }
     setLiveStatus("refreshing");
-    try {
-      const rows = await supabaseLoadAll();
-      if (rows.length === 0) { setLiveStatus("live"); return false; }
-      const ok = applySupabaseRows(rows);
-      const now = new Date().toISOString(); setLastUpdatedAt(now); setLiveStatus("live"); setBackendError("");
-      if (ok) { saveLocalBackup({ plans, scores, compPlans, compScores, instOverrides, procOverrides, overrides, auditorProfiles, security }); }
-      return ok;
-    } catch (e: any) {
-      setLiveStatus("offline"); return false;
+    const res = await sbLoadAll();
+    const now = new Date().toISOString();
+    if (!res.ok) {
+      setSupabaseConnected(false); setSupabaseReason(res.reason || "unknown"); setLiveStatus("offline");
+      setLiveToast(`Supabase not connected: ${res.reason || "unknown"} — showing local data only`);
+      return false;
     }
+    setSupabaseConnected(true); setSupabaseReason(""); setSyncRowsLoaded(res.rows.length); setLastSyncAt(now); setLastUpdatedAt(now); setLiveStatus("live"); setBackendError("");
+    if (res.rows.length === 0) { return true; }
+    const ok = applySupabaseRows(res.rows);
+    if (ok) { saveLocalBackup({ plans, scores, compPlans, compScores, instOverrides, procOverrides, overrides, auditorProfiles, security }); }
+    return true;
   };
 
-  const reloadRecords = async () => {
-    // Try Supabase first
+  const reloadRecords = async (): Promise<boolean> => {
     if (isSupabaseConfigured) {
       const ok = await loadFromSupabase();
-      if (ok) return;
+      if (ok) return true;
+      // Shared fetch failed: fall through to the records-API path below
+      // instead of clearing state, and never touch the logged-in user.
     }
-    // Fallback to records API
     try {
       const cols = ["audit_plans", "audit_scores", "audit_passwords", "competency_plans", "competency_scores", "audit_institutions", "audit_procedures", "audit_auditor_names", "audit_security", "audit_login_attempts"];
       const raw = await Promise.all(cols.map(c => api("records.list", { collection: c }).catch(() => ({ records: [] }))));
@@ -426,19 +461,48 @@ export default function App() {
       if (p.length) setPlans(p); if (s.length) setScores(s); if (o.length) setOverrides(o); if (cp.length) setCompPlans(cp); if (cs.length) setCompScores(cs); if (io.length) setInstOverrides(io); if (po.length) setProcOverrides(po); if (ap.length) setAuditorProfiles(ap); setSecurity(sec); setSecurityId(secRec ? secRec.id : ""); setLoginAttempts(att);
       const now = new Date().toISOString(); setLastUpdatedAt(now); setLiveStatus("live");
       saveLocalBackup({ plans: p.length ? p : plans, scores: s.length ? s : scores, compPlans: cp.length ? cp : compPlans, compScores: cs.length ? cs : compScores, instOverrides: io, procOverrides: po, overrides: o, auditorProfiles: ap, security: sec });
+      return true;
     } catch {
-      // Try local backup
       const backup = loadLocalBackup();
       if (backup) {
         if (backup.plans) setPlans(backup.plans); if (backup.scores) setScores(backup.scores); if (backup.compPlans) setCompPlans(backup.compPlans); if (backup.compScores) setCompScores(backup.compScores);
         if (backup.overrides) setOverrides(backup.overrides); if (backup.instOverrides) setInstOverrides(backup.instOverrides); if (backup.procOverrides) setProcOverrides(backup.procOverrides);
         if (backup.security) setSecurity(backup.security);
         setLiveStatus("offline");
+      } else {
+        setLiveStatus("offline");
       }
+      return false;
     }
   };
 
   useEffect(() => { (async () => { await reloadRecords(); })(); }, []);
+
+  // Auto-refresh every 10 seconds: re-fetch + merge from the shared
+  // database only. Never reloads the page and never clears the user.
+  // Skipped while a score sheet is open or a save is in flight so an
+  // in-progress edit is not overwritten by incoming data.
+  const reloadRef = React.useRef(reloadRecords);
+  useEffect(() => { reloadRef.current = reloadRecords; });
+  useEffect(() => {
+    if (!user) return;
+    const timer = setInterval(async () => {
+      if (selectedCell || busy) return;
+      try { await reloadRef.current(); } catch { /* status already set to offline by reloadRecords */ }
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [user, selectedCell, busy]);
+
+  // Sync-first save: Supabase FIRST, awaited. On failure show a visible
+  // toast — never silently fall back. Local backup / records API run after.
+  const syncSaveFirst = async (id: string, dataObj: any) => {
+    if (!isSupabaseConfigured) { setSupabaseConnected(false); setSupabaseReason("no-config"); setLiveToast("Save failed to Supabase: no-config — not saved"); return { ok: false, reason: "no-config" }; }
+    const res = await sbSave(id, dataObj);
+    const now = new Date().toISOString();
+    if (res.ok) { setSupabaseConnected(true); setSupabaseReason(""); setLastSyncAt(now); setLastUpdatedAt(now); setLiveStatus("live"); }
+    else { setSupabaseConnected(false); setSupabaseReason(res.reason || "unknown"); setLiveStatus("offline"); setLiveToast(`Save failed to Supabase: ${res.reason || "unknown"} — not saved. Try again.`); }
+    return res;
+  };
 
   const activePlan = useMemo(() => {
     const forTopic = plans.filter(p => p.topic === topic);
@@ -482,16 +546,25 @@ export default function App() {
     return [...cands].sort((a, b) => { const da = a.auditedAt ? new Date(a.auditedAt).getTime() : 0; const db = b.auditedAt ? new Date(b.auditedAt).getTime() : 0; if (db !== da) return db - da; return (MONTH_INDEX[b.period] ?? 0) - (MONTH_INDEX[a.period] ?? 0); })[0];
   };
 
-  // Manual refresh
   const manualRefresh = async () => {
+    // Refresh = re-fetch + merge only. No page reload, no logout:
+    // the logged-in user state is left untouched.
+    if (refreshing) return;
     setRefreshing(true); setLiveStatus("refreshing");
-    await reloadRecords();
-    const now = new Date().toISOString(); setLastUpdatedAt(now); setLiveStatus("live"); setRefreshing(false);
-    setLiveToast(`Live • Updated ${formatLiveTime(now)}`);
+    let ok = false;
+    try { ok = await reloadRecords(); } catch { ok = false; }
+    const now = new Date().toISOString();
+    setRefreshing(false);
+    if (ok) {
+      setLastUpdatedAt(now); setLiveStatus("live");
+      setLiveToast(`Live • Updated ${formatLiveTime(now)}`);
+    } else {
+      setLiveStatus("offline");
+      setLiveToast("Local only — shared database could not be reached. Your login is kept; try Refresh again.");
+    }
     setTimeout(() => setLiveToast(null), 4000);
   };
 
-  // Login
   async function login(e: React.FormEvent) {
     e.preventDefault(); setLoginError("");
     const uname = username.trim().toLowerCase(); const entered = password;
@@ -507,14 +580,15 @@ export default function App() {
     if (security.locked && matchedUser.role !== "Master") { setLoginError("System locked by Master."); return; }
     if (security.accessCodeEnabled && accessCodeInput.trim() !== security.accessCode) { setLoginError("Incorrect Directorate Access Code."); return; }
     setUser(matchedUser); setUserSessionVersion(security.sessionVersion); setTab("Dashboard"); setAccessCodeInput(""); setRecoveryInput(""); setLoginError("");
+    // Persist only username + sessionVersion on THIS device (never password, never Supabase).
+    try { localStorage.setItem('audit_current_user', JSON.stringify({ username: matchedUser.username, sessionVersion: security.sessionVersion })); } catch {}
     await reloadRecords();
   }
-  function logout() { setUser(null); setPassword(""); setSelectedCell(null); setUserSessionVersion(null); }
+  async function logout() { setUser(null); setPassword(""); setSelectedCell(null); setUserSessionVersion(null); try { localStorage.removeItem('audit_current_user'); } catch {} }
 
   const isScoreValid = (v: string) => { const t = v.trim().toUpperCase(); if (t === "") return false; if (t === "NA") return true; const n = Number(t); return !isNaN(n) && n >= 0 && n <= 100; };
   const isNameValid = (v: string) => v.trim().length >= 2;
 
-  // Save cell with Supabase + records API + local backup
   async function saveCell() {
     if (!selectedCell || !user) return;
     const val = scoreInput.trim().toUpperCase();
@@ -532,14 +606,10 @@ export default function App() {
       const value = { planId: activeCompPlan.id, wilayat: selectedCell.wilayat, institution: cleanInstitutionName(selectedCell.institution, selectedCell.wilayat), category: selectedCell.category || category, year: activeCompPlan.year, period: selectedCell.period, procedure: proc, score: val, comment: commentInput.trim(), auditorName: nameVal, auditedAt: nowIso, history: existing?.history || [] };
       const newId = existing ? existing.id : `comp-score-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const newRec: CompScore = { id: newId, ...value } as CompScore;
-      // Update UI immediately
       setCompScores(prev => { const filtered = prev.filter(s => !(s.wilayat === selectedCell.wilayat && s.institution === selectedCell.institution && s.period === selectedCell.period && s.planId === activeCompPlan.id)); return [...filtered, newRec]; });
-      // Supabase
       const supId = `competency_scores_${newId}`;
-      await supabaseUpsert(supId, { id: newId, ...value });
-      // Records API fallback non-blocking
+      await syncSaveFirst(supId, { id: newId, ...value });
       try { if (existing) await api("records.replace", { collection: "competency_scores", id: existing.id, value }); else await api("records.create", { collection: "competency_scores", value, idempotency_key: `compscore-${activeCompPlan.id}-${selectedCell.wilayat}-${selectedCell.institution}-${selectedCell.period}-${Date.now()}` }); } catch {}
-      // local backup
       saveLocalBackup({ plans, scores, compPlans, compScores: [...compScores.filter(s => !(s.wilayat === selectedCell.wilayat && s.institution === selectedCell.institution && s.period === selectedCell.period && s.planId === activeCompPlan.id)), newRec], instOverrides, procOverrides, overrides, auditorProfiles, security });
       setSaveMsg("Saved. Syncing to shared database..."); setSelectedCell(null); setBusy(false);
       setLastUpdatedAt(nowIso); setLiveStatus("live");
@@ -552,7 +622,7 @@ export default function App() {
     const newRec: Score = { id: newId, ...value } as Score;
     setScores(prev => { const filtered = prev.filter(s => !(s.wilayat === selectedCell.wilayat && s.institution === selectedCell.institution && s.period === selectedCell.period && s.planId === activePlan.id)); return [...filtered, newRec]; });
     const supId = `audit_scores_${newId}`;
-    await supabaseUpsert(supId, { id: newId, ...value });
+    await syncSaveFirst(supId, { id: newId, ...value });
     try { if (existing) await api("records.replace", { collection: "audit_scores", id: existing.id, value }); else await api("records.create", { collection: "audit_scores", value, idempotency_key: `score-${activePlan.id}-${selectedCell.wilayat}-${selectedCell.institution}-${selectedCell.period}-${Date.now()}` }); } catch {}
     saveLocalBackup({ plans, scores: [...scores.filter(s => !(s.wilayat === selectedCell.wilayat && s.institution === selectedCell.institution && s.period === selectedCell.period && s.planId === activePlan.id)), newRec], compPlans, compScores, instOverrides, procOverrides, overrides, auditorProfiles, security });
     setSaveMsg("Saved. Syncing to shared database..."); setSelectedCell(null); setBusy(false); setLastUpdatedAt(nowIso); setLiveStatus("live");
@@ -593,7 +663,6 @@ export default function App() {
   const headerRoleText = isMaster ? "Master" : isAdminRole ? "Admin — Nursing Service Department" : `${user?.label} — Wilayat`;
   const tabs = ["Dashboard", "Audit Grid", "Comments", "Guide", ...(isAdmin ? ["Plans", "Control Panel"] : [])];
 
-  // stats
   function statsFor(list: Score[]) { const nums = list.filter(s => s.score !== "NA" && s.score !== "").map(s => parseFloat(s.score)).filter(n => !isNaN(n)); return { count: list.length, avg: nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null }; }
   function statsForComp(list: CompScore[]) { const nums = list.filter(s => s.score !== "NA" && s.score !== "").map(s => parseFloat(s.score)).filter(n => !isNaN(n)); return { count: list.length, avg: nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null }; }
   const gridStats = useMemo(() => {
@@ -611,23 +680,8 @@ export default function App() {
     return { count, avg: st.avg, totalExpected, missing: Math.max(0, totalExpected - count), completion: totalExpected ? (count / totalExpected * 100) : 0 };
   }, [compPlanScores, visibleCompInstitutions, activeCompPlan, activeBlocks]);
 
-  const dbLabel = isSupabaseConfigured ? `Live • Supabase • Updated ${formatLiveTime(lastUpdatedAt)}` : `Local mode • Updated ${formatLiveTime(lastUpdatedAt)}`;
+  const dbLabel = isSupabaseConfigured && supabaseConnected ? `Live • Supabase • Connected • Updated ${formatLiveTime(lastUpdatedAt)}` : isSupabaseConfigured ? `Local only • Supabase not connected: ${supabaseReason || "unknown"}` : `Local mode • Updated ${formatLiveTime(lastUpdatedAt)}`;
 
-  const RefreshBig = (
-    <button
-      type="button"
-      onClick={manualRefresh}
-      disabled={refreshing}
-      title="Tap to refresh scores from database"
-      aria-label="Refresh scores from database"
-      className="flex min-h-[44px] items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-black text-[var(--teal)] shadow-[0_4px_14px_rgba(0,0,0,.25)] border border-white hover:bg-white/90 active:scale-[0.98] disabled:opacity-60"
-      style={{ minHeight: 44, touchAction: 'manipulation', cursor: 'pointer' }}
-    >
-      <RefreshCw size={18} className={refreshing ? "animate-spin" : ""} />⟳ Refresh
-    </button>
-  );
-
-  // CSV export kept
   function exportCSV() {
     if (part === "2") {
       if (!activeCompPlan) return;
@@ -720,7 +774,6 @@ export default function App() {
     downloadXLSX(`Part2_Stats_${activeCompPlan?.year || "All"}_${category}_${Date.now()}.xlsx`, [{ name: "Detailed Scores", rows: detailedRows }, { name: "Summary by Category", rows: summaryRows }]);
   }
 
-  // Plans creation
   async function createPlan(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
     try {
@@ -728,7 +781,7 @@ export default function App() {
       const newId = `plan-${Date.now()}`;
       const newP: Plan = { id: newId, ...value };
       setPlans(prev => [...prev.filter(p => !(p.topic === value.topic && p.year === value.year)), newP]);
-      await supabaseUpsert(`audit_plans_${newId}`, { id: newId, ...value });
+      await syncSaveFirst(`audit_plans_${newId}`, { id: newId, ...value });
       try { await api("records.create", { collection: "audit_plans", value, idempotency_key: `plan-${newPlan.topic}-${newPlan.year}-${Date.now()}` }); } catch {}
       setSaveMsg("Plan created and set as active."); setTopic(newPlan.topic);
     } catch (err: any) { setSaveMsg(`Could not create plan: ${err.message}`); }
@@ -741,7 +794,7 @@ export default function App() {
       const newId = `compplan-${Date.now()}`;
       const newP: CompPlan = { id: newId, ...value };
       setCompPlans(prev => [...prev.filter(p => !(p.category === value.category && p.year === value.year)), newP]);
-      await supabaseUpsert(`competency_plans_${newId}`, { id: newId, ...value });
+      await syncSaveFirst(`competency_plans_${newId}`, { id: newId, ...value });
       try { await api("records.create", { collection: "competency_plans", value, idempotency_key: `compplan-${newCompPlan.category}-${newCompPlan.year}-${Date.now()}` }); } catch {}
       setSaveMsg("Part 2 plan created."); setCategory(newCompPlan.category);
     } catch (err: any) { setSaveMsg(`Could not create Part 2 plan: ${err.message}`); }
@@ -758,7 +811,7 @@ export default function App() {
       const newId = existing ? existing.id : `pwd-${Date.now()}`;
       const val = { username: pwdForm.username, password: pwdForm.password };
       if (existing) setOverrides(prev => prev.map(o => o.id === existing.id ? { ...o, ...val } : o)); else setOverrides(prev => [...prev, { id: newId, ...val }]);
-      await supabaseUpsert(`audit_passwords_${pwdForm.username}`, { id: newId, ...val });
+      await syncSaveFirst(`audit_passwords_${pwdForm.username}`, { id: newId, ...val });
       if (existing) await api("records.replace", { collection: "audit_passwords", id: existing.id, value: val }).catch(() => {});
       else await api("records.create", { collection: "audit_passwords", value: val, idempotency_key: `pwd-${pwdForm.username}-${Date.now()}` }).catch(() => {});
       setPwdMsg(`Password updated for ${pwdForm.username}.`); setPwdForm({ ...pwdForm, password: "" }); setPwdConfirm("");
@@ -766,7 +819,6 @@ export default function App() {
     setBusy(false);
   }
 
-  // Institution form helpers
   function toggleInstAssignment(a: string) { setInstForm(prev => ({ ...prev, assignments: prev.assignments.includes(a) ? prev.assignments.filter(x => x !== a) : [...prev.assignments, a] })); }
   async function saveInstitution(e: React.FormEvent) {
     e.preventDefault(); setInstMsg("");
@@ -776,16 +828,14 @@ export default function App() {
     setBusy(true);
     try {
       const newId = editingInst?.sourceId || `inst-${Date.now()}`;
-      const kind = editingInst ? "edit" : "add";
-      const val = { kind, wilayat: instForm.wilayat, name: cleanName, assignments: instForm.assignments, originalWilayat: editingInst?.wilayat, originalName: editingInst?.institution };
-      if (editingInst) setInstOverrides(prev => prev.map(x => x.id === newId ? { ...x, ...val, id: newId } : x)); else setInstOverrides(prev => [...prev, { id: newId, ...val } as InstOverride]);
-      await supabaseUpsert(`audit_institutions_${newId}`, { id: newId, ...val });
+      const val = { kind: editingInst ? "edit" : "add", wilayat: instForm.wilayat, name: cleanName, assignments: instForm.assignments, originalWilayat: editingInst?.wilayat, originalName: editingInst?.institution };
+      if (editingInst) setInstOverrides(prev => prev.map(x => x.id === newId ? { ...x, ...val, id: newId } as InstOverride : x)); else setInstOverrides(prev => [...prev, { id: newId, ...val } as InstOverride]);
+      await syncSaveFirst(`audit_institutions_${newId}`, { id: newId, ...val });
       setInstMsg(`Institution "${cleanName}" saved.`); setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"] });
     } catch (err: any) { setInstMsg(`Could not save: ${err.message}`); }
     setBusy(false);
   }
 
-  // Procedure form
   function normalizeProcName(raw: string, tag: string) { const trimmed = raw.trim(); if (tag === "LR" || tag === "RMC") { const base = stripProcedurePrefix(trimmed); return `[${tag}] ${base}`; } return trimmed; }
   async function saveProcedure(e: React.FormEvent) {
     e.preventDefault(); setProcMsg("");
@@ -795,337 +845,396 @@ export default function App() {
     try {
       const newId = editingProc?.sourceId || `proc-${Date.now()}`;
       const val = { kind: editingProc ? "edit" : "add", name: finalName, originalName: editingProc?.originalName || editingProc?.name };
-      if (editingProc) setProcOverrides(prev => prev.map(x => x.id === newId ? { ...x, ...val, id: newId } : x)); else setProcOverrides(prev => [...prev, { id: newId, ...val } as ProcOverride]);
-      await supabaseUpsert(`audit_procedures_${newId}`, { id: newId, ...val });
+      if (editingProc) setProcOverrides(prev => prev.map(x => x.id === newId ? { ...x, ...val, id: newId } as ProcOverride : x)); else setProcOverrides(prev => [...prev, { id: newId, ...val } as ProcOverride]);
+      await syncSaveFirst(`audit_procedures_${newId}`, { id: newId, ...val });
       setProcMsg(`Procedure "${finalName}" saved.`); setEditingProc(null); setProcForm({ name: "", tag: "General" });
     } catch (err: any) { setProcMsg(`Could not save: ${err.message}`); }
     setBusy(false);
   }
 
   const part1Total = Object.values(effPart1).reduce((a, b) => a + b.length, 0);
-  const part2Totals = CATEGORIES.map(c => (effComp[c] || []).length);
 
-  return <div data-safe-area-inset-root style={{ boxSizing: "border-box", paddingTop: "var(--safe-area-inset-top)", minHeight: "100vh", background: "var(--bg)" }} className="overflow-x-clip">
-    {!user ? <>
-      <div className="mx-auto max-w-6xl px-3 py-6 sm:px-6">
-        <div className="mb-5 flex flex-col items-center text-center">
-          <div className="rounded-2xl bg-white p-3 shadow-sm"><img src={mohLogo} alt="Ministry of Health logo" className="h-[76px] w-auto object-contain sm:h-[84px]" /></div>
-          <p className="mt-3 text-xs font-bold tracking-[.2em] uppercase text-[var(--muted)]">Directorate of Health Services</p>
-          <h1 className="mt-2 text-[clamp(1.8rem,5vw,2.8rem)] font-black leading-[1.05]">North Al Batinah — Nursing Audit System</h1>
-        </div>
-        <div className="overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface)]">
-          <div className="grid md:grid-cols-2">
-            <div className="flex flex-col bg-[var(--teal)] p-6 text-white sm:p-8">
-              <p className="mt-4 max-w-md text-white/90">Submit audit results by plan, keep comments with every score, and see completion and averages update as Wilayats enter their work.</p>
-              <div className="mt-8 grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-xl bg-white/15 p-3"><div className="text-2xl font-black">{part1Total}</div><div className="text-xs">Institutions</div></div>
-                <div className="rounded-xl bg-white/15 p-3"><div className="text-2xl font-black">6</div><div className="text-xs">Wilayats</div></div>
-                <div className="rounded-xl bg-white/15 p-3"><div className="text-2xl font-black">4</div><div className="text-xs">Topics</div></div>
-              </div>
-              <div className="mt-6 text-sm text-white/85"><strong>Wilayats:</strong> {WILAYAT_ORDER.map(w => `${w} (${(effPart1[w] || []).length})`).join(" · ")}</div>
-              <div className="mt-4 rounded-xl bg-white/10 p-3 text-sm"><strong>Part 2 — Competency Procedures:</strong> General Nursing ({part2Totals[0]}) · Renal Medicine Center ({part2Totals[1]}) · Labour Rooms ({part2Totals[2]}). Same logins, separate plans and scores.</div>
-              <p className="mt-auto pt-6 text-center text-sm font-bold text-white">Brought to you by: Juma Al Marzouqi [Saham Hospital]</p>
-              <p className="mt-3 text-center text-xs text-white/70">{isSupabaseConfigured ? "Live • Supabase • Shared Database" : "Local mode — add VITE_SUPABASE env to enable cross-PC sync"}</p>
-            </div>
-            <div className="p-5 sm:p-7">
-              <h2 className="text-xl font-extrabold">Sign in</h2><p className="text-sm text-[var(--muted)]">Choose a demo account, or type a username and password.</p>
-              <form onSubmit={login} className="mt-4 space-y-3">
-                <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="username" /></label>
-                <label className="block text-sm font-bold">Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} className="mt-1 w-full" autoComplete="current-password" /></label>
-                {security.locked && <label className="block text-sm font-bold">Recovery Code <span className="text-red-600">* Required for Master Unlock</span><input type="password" value={recoveryInput} onChange={e => setRecoveryInput(e.target.value)} className="mt-1 w-full" placeholder="Recovery Code set by Master" autoComplete="off" /></label>}
-                {security.accessCodeEnabled && <label className="block text-sm font-bold">Directorate Access Code <span className="text-red-600">* Required</span><input type="password" value={accessCodeInput} onChange={e => setAccessCodeInput(e.target.value)} className="mt-1 w-full" placeholder="Directorate Access Code" autoComplete="off" /></label>}
-                {loginError && <p className="rounded-lg bg-[var(--red)] p-2 text-sm font-semibold">{loginError}</p>}
-                <button className="w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white">{security.locked ? "Master Unlock" : "Sign in"}</button>
-              </form>
-              <div className="mt-5">
-                <p className="mt-3 text-xs font-bold uppercase tracking-wider text-[var(--muted)]">Demo logins — tap to fill</p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  {effectiveUsers.map(u => <button key={u.username} onClick={() => { setUsername(u.username); setPassword(u.password); }} className="rounded-lg border border-[var(--line)] px-2 py-2 text-left text-sm hover:bg-[var(--surface2)]">
-                    <span className="block font-bold capitalize">{u.label} {u.role === "Wilayat" ? "— Wilayat" : ""}</span>
-                    <span className="text-xs text-[var(--muted)]">{u.username} · {u.password}</span>
-                  </button>)}
-                </div>
-              </div>
-              <p className="mt-4 text-xs leading-relaxed text-[var(--muted)]">Demo accounts are for this preview. Wilayat users only see their own Wilayat. Admin sees all Wilayats and can manage plans and Wilayat passwords. Master sees all and controls access. {isSupabaseConfigured ? "Supabase sync enabled — saves appear on other PCs." : "Supabase not configured — using local/records API fallback. Add VITE_SUPABASE_URL and KEY in Vercel env."}</p>
-            </div>
+  // ---------- FIXED HEADER LAYOUT ----------
+  const CompactHeader = (
+    <header data-safe-area-sticky-top style={{ top: "var(--safe-area-inset-top)" }} className="noprint sticky z-30 border-b border-white/10 bg-[var(--teal)] text-white">
+      <div className="mx-auto flex max-w-[1500px] items-center gap-3 px-4 py-3">
+        <img src={mohLogo} alt="MOH Logo" className="h-10 w-auto shrink-0 rounded-lg bg-white p-1 object-contain" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-2">
+            <h1 className="truncate text-[15px] font-black leading-tight sm:text-[17px]">North Al Batinah — Nursing Audit System</h1>
+            <span className="hidden text-xs font-semibold text-white/80 sm:inline">Directorate of Health Services • {headerRoleText}</span>
+            <span className="truncate text-[11px] font-semibold text-white/80 sm:hidden">{headerRoleText} • {user?.wilayat}</span>
           </div>
+        </div>
+        <div className="hidden shrink-0 items-center gap-2 sm:flex">
+          <span className="rounded-full bg-white/20 px-2.5 py-1 text-xs font-bold">{user?.wilayat}</span>
+          <button type="button" onClick={() => setShowHelp(true)} className="rounded-full bg-white/15 px-3 py-1.5 text-sm font-bold hover:bg-white/25">Guide</button>
+          <button type="button" onClick={logout} className="rounded-full bg-white px-3 py-1.5 text-sm font-bold text-[var(--teal)] hover:bg-white/90"><LogOut className="mr-1 inline" size={14} />Logout</button>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 sm:hidden">
+          <button type="button" onClick={() => setShowHelp(true)} aria-label="Guide" className="rounded-full bg-white/15 p-2"><HelpCircle size={18} /></button>
+          <button type="button" onClick={logout} aria-label="Logout" className="rounded-full bg-white p-2 text-[var(--teal)]"><LogOut size={18} /></button>
         </div>
       </div>
-    </> : <>
-      <header data-safe-area-sticky-top style={{ top: "var(--safe-area-inset-top)" }} className="noprint sticky z-20 border-b border-[var(--line)] bg-[var(--teal)] text-white">
-        <div className="mx-auto flex max-w-[1500px] items-center gap-2 px-3 py-2 sm:flex-wrap sm:gap-3 sm:px-5 sm:py-3">
-          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3"><img src={mohLogo} alt="Ministry of Health logo" className="h-10 w-auto shrink-0 rounded-lg bg-white object-contain p-1 sm:h-11" /><div className="min-w-0"><h1 className="truncate text-base font-black leading-tight sm:text-lg"><span className="sm:hidden">Nursing Audit System</span><span className="hidden sm:inline">North Al Batinah — Nursing Audit System</span></h1><p className="truncate text-xs text-white/85">Directorate · {headerRoleText}</p></div></div>
-          <span className="shrink-0 rounded-full bg-white/20 px-2 py-1 text-xs font-black [overflow-wrap:anywhere]">{user?.wilayat}</span>
-          <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex"><div className="flex flex-wrap items-center justify-end gap-2"><button onClick={() => setShowHelp(true)} className="rounded-full bg-white/15 px-3 py-1.5 text-sm font-bold"><HelpCircle className="mr-1 inline" size={16} />How to use</button><button onClick={logout} className="rounded-full bg-white px-3 py-1.5 text-sm font-bold text-[var(--teal)]"><LogOut className="mr-1 inline" size={16} />Logout</button></div><p className="text-xs font-semibold text-white/90">Brought to you by: Juma Al Marzouqi [Saham Hospital]</p></div>
-          <button onClick={() => setShowHelp(true)} aria-label="How to use" className="shrink-0 rounded-full bg-white/15 px-3 text-sm font-bold sm:hidden"><HelpCircle className="mr-1 inline" size={16} />Help</button>
-        </div>
-        <div className="mx-auto w-full max-w-[1500px] px-3 pb-3 sm:px-5">
-          <div className="flex w-full flex-wrap items-center gap-2 rounded-xl bg-white/15 p-2 backdrop-blur">
-            <div className="flex w-full flex-wrap items-center gap-2">
-              {RefreshBig}
-              <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-                {liveStatus === "offline" ? <span className="flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-2 text-xs font-bold text-amber-900"><span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />{isSupabaseConfigured ? "Supabase offline — using local backup" : "Local mode"}</span> : liveStatus === "refreshing" ? <span className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-2 text-xs font-bold"><RefreshCw size={14} className="animate-spin" />Refreshing...</span> : <span className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-2 text-xs font-bold"><span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-full bg-green-400" />{dbLabel}</span>}
-              </div>
-              <button type="button" onClick={logout} className="sm:hidden ml-auto rounded-full bg-white/15 px-3 py-2 text-xs font-bold">Logout</button>
-            </div>
-            <p className="w-full text-[11px] text-white/80">Tap Refresh to load latest scores from shared database — works in shared link on any phone. Phone A saves → Phone B taps Refresh → sees score. Supabase enabled: {isSupabaseConfigured ? "Yes — cross-PC sync active" : "No — set VITE_SUPABASE env"}</p>
-          </div>
-        </div>
-        <div className="mx-auto max-w-[1500px] px-3 pb-2 sm:px-5">
-          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Part">
-            <button onClick={() => { setPart("1"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "1"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "1" ? "bg-white text-[var(--teal)]" : "bg-white/10 text-white"}`}>Part 1 — Documentation Audits</button>
-            <button onClick={() => { setPart("2"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "2"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "2" ? "bg-white text-[var(--teal)]" : "bg-white/10 text-white"}`}>Part 2 — Competency Procedures</button>
-          </div>
-        </div>
-        <nav className="no-scrollbar mx-auto flex max-w-[1500px] flex-nowrap gap-1 overflow-x-auto px-3 pb-3 sm:flex-wrap sm:overflow-visible sm:px-5">{tabs.map(t => <button key={t} onClick={() => setTab(t)} className={`shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm font-bold ${tab === t ? "bg-white text-[var(--teal)]" : "bg-white/10 text-white"}`}>{t}</button>)}</nav>
-      </header>
+    </header>
+  );
 
-      <main className="mx-auto max-w-[1500px] px-3 py-4 pb-36 sm:px-5 sm:py-6 sm:pb-6">
-        {liveToast && <div role="status" className="mb-4 flex items-start justify-between gap-2 rounded-xl border border-[var(--teal)] bg-[var(--surface)] p-3 text-sm font-bold shadow"><span>{liveToast}</span><button type="button" onClick={() => setLiveToast(null)} aria-label="Dismiss notification" className="shrink-0 rounded-full border px-2 py-0.5 text-xs">Dismiss</button></div>}
-        {saveMsg && <div className="mb-4 rounded-xl bg-[var(--surface2)] p-3 text-sm font-semibold">{saveMsg}</div>}
-        {backendError && <div className="mb-4 rounded-xl bg-[var(--red)] p-3 text-sm font-bold">{backendError}</div>}
-
-        {tab === "Control Panel" && isAdmin && <section>
-          <h2 className="text-xl font-black">Control Panel</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">Same panel in Part 1 and Part 2. Passwords, institutions, and procedures are saved in the database (Supabase audit_data + local backup) and apply immediately. {dbLabel}</p>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <div className="card p-4"><h3 className="flex items-center gap-2 font-extrabold"><Users size={18} /> Accounts</h3><div className="mt-3 space-y-2">{effectiveUsers.map(u => <div key={u.username} className="flex justify-between gap-2 rounded-lg border p-3 text-sm"><span><strong>{u.label}</strong> — {u.username} · {u.role} · {u.wilayat}</span><span className="text-[var(--muted)]">Password: {u.password}</span></div>)}</div></div>
-            <form onSubmit={changePassword} className="card p-4"><h3 className="font-extrabold">Change a password</h3><label className="mt-3 block text-sm font-bold">Account<select value={pwdForm.username} onChange={e => setPwdForm({ ...pwdForm, username: e.target.value })} className="mt-1 w-full">{effectiveUsers.filter(u => isMaster || u.username !== "master").map(u => <option key={u.username} value={u.username}>{u.label} ({u.username}) — {u.role}</option>)}</select></label><label className="mt-3 block text-sm font-bold">New password<div className="mt-1 flex gap-2"><input type={showPwd ? "text" : "password"} value={pwdForm.password} onChange={e => setPwdForm({ ...pwdForm, password: e.target.value })} className="flex-1" placeholder="At least 4 characters" /><button type="button" onClick={() => setShowPwd(!showPwd)} className="rounded-lg border px-3 text-sm font-bold" aria-label={showPwd ? "Hide password" : "Show password"}>{showPwd ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><label className="mt-3 block text-sm font-bold">Confirm new password<input type={showPwd ? "text" : "password"} value={pwdConfirm} onChange={e => setPwdConfirm(e.target.value)} className="mt-1 w-full" placeholder="Re-enter new password" /></label>{pwdMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{pwdMsg}</p>}<button disabled={busy} className="mt-4 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Update password</button></form>
-          </div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <form onSubmit={saveInstitution} className="card p-4"><h3 className="font-extrabold">{editingInst ? "Edit institution" : "Add institution"}</h3><label className="mt-3 block text-sm font-bold">Wilayat<select value={instForm.wilayat} onChange={e => setInstForm({ ...instForm, wilayat: e.target.value })} className="mt-1 w-full">{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Institution name<input value={instForm.name} onChange={e => setInstForm({ ...instForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. Khaboorah EHC" /></label><fieldset className="mt-3"><legend className="text-sm font-bold">Assignments</legend>{["Part 1", "General Nursing", "Renal Medicine Center", "Labour Rooms"].map(a => <label key={a} className="mt-2 flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={instForm.assignments.includes(a)} onChange={() => toggleInstAssignment(a)} className="w-auto" /> {a}</label>)}</fieldset>{instMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{instMsg}</p>}<div className="mt-4 flex gap-2"><button disabled={busy} className="flex-1 rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingInst ? "Save changes" : "Add institution"}</button>{editingInst && <button type="button" onClick={() => { setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"] }); }} className="rounded-lg border px-3 py-2 font-bold">Cancel</button>}</div></form>
-            <div className="card p-4"><h3 className="font-extrabold">Institutions ({effInstList.length})</h3><div className="mt-3 space-y-2 max-h-[420px] overflow-auto">{WILAYAT_ORDER.map(w => { const items = effInstList.filter(e => e.wilayat === w); if (!items.length) return null; return <div key={w}><h4 className="font-bold">{w} — {items.length}</h4><div className="mt-1 space-y-1">{items.map(e => <div key={e.wilayat + e.institution} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold [overflow-wrap:anywhere]">{e.institution}</span><span className="text-xs text-[var(--muted)]">{e.assignments.join(" · ")}</span><button type="button" onClick={() => { setEditingInst(e); setInstForm({ wilayat: e.wilayat, name: e.institution, assignments: [...e.assignments] }); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Edit</button></div>)}</div></div>; })}</div></div>
-          </div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <form onSubmit={saveProcedure} className="card p-4"><h3 className="font-extrabold">{editingProc ? "Edit procedure" : "Add procedure"}</h3><label className="mt-3 block text-sm font-bold">Procedure name<input value={procForm.name} onChange={e => setProcForm({ ...procForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. IV Cannulation" /></label><label className="mt-3 block text-sm font-bold">Tag<select value={procForm.tag} onChange={e => setProcForm({ ...procForm, tag: e.target.value })} className="mt-1 w-full"><option value="General">General</option><option value="LR">[LR]</option><option value="RMC">[RMC]</option></select></label>{procMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{procMsg}</p>}<button disabled={busy} className="mt-4 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingProc ? "Save changes" : "Add procedure"}</button></form>
-            <div className="card p-4"><h3 className="font-extrabold">Procedures ({effectiveProcedures.length})</h3><div className="mt-3 flex gap-2"><input value={procSearch} onChange={e => setProcSearch(e.target.value)} placeholder="Search..." className="flex-1 text-sm" /><select value={procFilterTag} onChange={e => setProcFilterTag(e.target.value)} className="text-sm"><option value="All">All</option><option value="General">General</option><option value="LR">[LR]</option><option value="RMC">[RMC]</option></select></div><div className="mt-3 max-h-[420px] space-y-1 overflow-auto">{effectiveProcedures.filter(p => { if (procFilterTag !== "All" && procTag(p) !== procFilterTag) return false; if (procSearch && !p.toLowerCase().includes(procSearch.toLowerCase())) return false; return true; }).map(p => <div key={p} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="chip bg-[var(--surface2)]">{procTag(p)}</span><span className="font-semibold [overflow-wrap:anywhere]">{p}</span><button type="button" onClick={() => { setEditingProc({ name: p }); setProcForm({ name: p, tag: procTag(p) }); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Edit</button></div>)}</div></div>
-          </div>
-        </section>}
-
-        {tab === "Guide" && <section className="mx-auto max-w-[720px]"><div className="card p-4 sm:p-6"><h2 className="text-[clamp(1.4rem,5vw,1.9rem)] font-black leading-tight">Wilayat Quick Guide — How to Enter Scores on Your Phone</h2><p className="mt-2 text-[15px] text-[var(--muted)]">Simple steps for Wilayat users on a small phone.</p><div className="mt-5 space-y-5 text-[16px] leading-[1.5]"><div className="rounded-xl border bg-[var(--surface2)] p-4"><p className="font-black">Step 1: Open shared link</p><p className="mt-2">Open shared link on phone, log in with Wilayat account, e.g. suhar / suhar123. If no Refresh button, pull down to refresh.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 2: Choose Part</p><p>Choose Part 1 or Part 2 at top.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 3: Year and Topic/Category</p><p>Choose Year and Topic or Category — e.g. 2027 + Crash Cart.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 4: Audit Grid months</p><p>Swipe sideways to see months Jan-Dec. Turn ON Single month view for easiest entry.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 5: Tap a cell</p><p>Tap a cell, e.g. Saham Hospital • Jan. Bottom sheet opens: Score 0-100 or NA, Your Name mandatory, Comment optional, Save.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 6: Refresh</p><p>Tap Refresh at top to see latest scores from other Wilayats. Live status shows updated time. Supabase sync: Phone A saves → Phone B taps Refresh → sees score.</p></div></div><pre className="mt-4 whitespace-pre-wrap break-words text-[14px] bg-[var(--surface2)] p-3 rounded-xl">{GUIDE_TEXT}</pre></div></section>}
-
-        {tab !== "Control Panel" && tab !== "Guide" && part === "1" && <>
-          <section className="card mb-4 p-3 sm:p-4">
-            <div className="flex flex-wrap items-end gap-3">
-              <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Topic</label><div className="mt-1 flex flex-wrap gap-1">{TOPICS.map(t => <button key={t} onClick={() => setTopic(t)} className={`rounded-full px-3 py-1.5 text-sm font-bold ${topic === t ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{t}</button>)}</div></div>
-              <label className="min-w-[220px] flex-1 text-sm font-bold">Plan<select value={activePlan?.id || ""} onChange={e => setPlanId(e.target.value)} className="mt-1 w-full"><option value="">No plan for this topic</option>{plans.filter(p => p.topic === topic).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label>
-              {isAdmin && <label className="text-sm font-bold">Wilayat filter<select value={wilayatFilter} onChange={e => setWilayatFilter(e.target.value)} className="mt-1"><option value="All">All Wilayats</option>{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w} ({(effPart1[w] || []).length})</option>)}</select></label>}
-              <label className="flex-1 min-w-[180px] text-sm font-bold"><span className="flex items-center gap-1"><Search size={14} /> Search institution</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. Suhar EHC" className="mt-1 w-full" /></label>
-              <div className="flex gap-2"><button onClick={exportCSV} disabled={!activePlan} className="rounded-lg bg-[var(--blue)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Download className="mr-1 inline" size={16} />Export CSV</button><button onClick={() => setTab("Dashboard")} className="rounded-lg border px-3 py-2 text-sm font-bold">Dashboard</button></div>
-            </div>
-            {!activePlan && <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">No plan yet for <strong>{topic}</strong>. {isAdmin ? "Create one in Plans." : "Ask Admin to create a plan."}</div>}
-          </section>
-
-          {tab === "Dashboard" && <div>
-            <div className="mt-4 flex flex-wrap gap-3">
-              {isAdmin ? <>
-                <button onClick={exportPart1StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--teal)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export Part 1 Statistics Excel</button>
-                <button onClick={exportPart2StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--blue)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export Part 2 Statistics Excel</button>
-              </> : <button onClick={exportPart1StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--teal)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export My Statistics Excel</button>}
-              <span className="self-center text-xs text-[var(--muted)]">{dbLabel} • Asia/Muscat • clean names • real .xlsx</span>
-            </div>
-            <section className="card mt-4 p-4"><h2 className="flex items-center gap-2 font-extrabold"><BarChart3 size={18} /> Summary — {topic}</h2><div className="mt-3 grid gap-2 sm:grid-cols-2"> <div>Completion <strong>{gridStats.completion.toFixed(1)}%</strong></div><div>Audits <strong>{gridStats.count}</strong></div><div>Average <strong>{gridStats.avg ? gridStats.avg.toFixed(2) + "%" : "—"}</strong></div><div>Missing <strong>{gridStats.missing}</strong></div></div></section>
-          </div>}
-
-          {tab === "Audit Grid" && <section className="card p-3 sm:p-4">
-            <div className="mb-3 flex flex-wrap gap-4 text-sm"><span><strong>{topic}</strong> · {activePlan ? `${activePlan.year} · Monthly · 12 months` : "No plan"}</span><span>Completion <strong>{gridStats.completion.toFixed(1)}%</strong></span><span>Audits <strong>{gridStats.count}</strong></span><span>Average <strong>{gridStats.avg ? gridStats.avg.toFixed(2) + "%" : "—"}</strong></span><span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-800">{dbLabel}</span></div>
-            {!activePlan ? <p className="text-sm text-[var(--muted)]">Select or create a plan to see the grid.</p> : <>
-              <p className="mb-2 rounded-lg bg-[var(--amber)] px-3 py-2 text-sm font-semibold">Tap a cell to enter score — row stays highlighted until you Save. Score and Auditor Name are mandatory. Use top Refresh to get latest from Supabase shared database.</p>
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <label className="w-full text-sm font-bold sm:w-auto">Jump to institution / Wilayat<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search institution…" className="mt-1 w-full sm:w-[220px]" /></label>
-                <button type="button" onClick={() => setSingleMonthView(!singleMonthView)} aria-pressed={singleMonthView} className={`rounded-full px-4 font-bold ${singleMonthView ? "bg-[var(--teal)] text-white" : "border"}`}>{singleMonthView ? "Single month view: ON" : "Single month view: OFF"}</button>
-              </div>
-              <div className="mb-2"><label className="text-xs font-bold uppercase text-[var(--muted)]">Month picker</label><div className="no-scrollbar mt-1 flex gap-1 overflow-x-auto pb-1" role="tablist" aria-label="Month picker">{MONTHS.map((m, mi) => <button key={m} type="button" onClick={() => { setMobileMonthIdx(mi); const el = gridRef.current?.querySelector(`[data-month="${m}"]`); if (gridRef.current && el) gridRef.current.scrollLeft = Math.max(0, (el as HTMLElement).offsetLeft - 180); }} aria-pressed={mobileMonthIdx === mi} className={`shrink-0 rounded-full px-3 text-sm font-bold ${mobileMonthIdx === mi ? "bg-[var(--teal)] text-white" : "border"}`}>{m}</button>)}</div></div>
-              <p className="mb-2 text-sm font-semibold">← Swipe to see months → • Refresh button is always visible in top green bar (second row)</p>
-              <div ref={gridRef} className="gridwrap">
-                <table className="excel">
-                  <thead><tr><th>Institution</th>{(singleMonthView ? [MONTHS[mobileMonthIdx]] : MONTHS).map(m => <th key={m} data-month={m}>{m}</th>)}</tr></thead>
-                  <tbody>
-                    {visibleInstitutions.map(v => {
-                      const isEditingRow = selectedCell && selectedCell.wilayat === v.wilayat && selectedCell.institution === v.institution && selectedCell.part !== "2";
-                      return <tr key={v.wilayat + v.institution} className={isEditingRow ? "editing-row" : ""}>
-                        <td className="font-bold [overflow-wrap:anywhere]">{labelFor(v.wilayat, v.institution)}<span className="block text-xs font-normal text-[var(--muted)]">{v.wilayat}</span></td>
-                        {(singleMonthView ? [MONTHS[mobileMonthIdx]] : MONTHS).map(period => {
-                          const s = findScore(v.wilayat, v.institution, period);
-                          const isEditingCell = selectedCell && selectedCell.wilayat === v.wilayat && selectedCell.institution === v.institution && selectedCell.period === period && selectedCell.part !== "2";
-                          return <td key={period} className={isEditingCell ? "editing-cell" : ""} style={s ? scoreColor(s.score) : {}}>
-                            <button
-                              type="button"
-                              onClick={() => openCell(v, period)}
-                              className={`cellBtn ${s?.comment ? "hasComment" : ""}`}
-                              style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44 }}
-                              aria-label={`Edit ${labelFor(v.wilayat, v.institution)} ${period} score ${s?.score || "empty"}`}
-                            >
-                              {s ? s.score : "—"}
-                            </button>
-                          </td>;
-                        })}
-                      </tr>;
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {visibleInstitutions.length === 0 && <p className="mt-3 text-sm text-[var(--muted)]">No institutions match your filter.</p>}
-            </>}
-          </section>}
-
-          {tab === "Comments" && <section className="card p-4"><h2 className="flex items-center gap-2 font-extrabold"><MessageSquare size={18} /> Comments — {topic}</h2><p className="mt-1 text-sm text-[var(--muted)]">{dbLabel}</p>
-            <div className="mt-3 space-y-3">{planScores.filter(s => s.comment || s.auditorName).map(c => <article key={c.id} className="rounded-xl border p-3"><div className="flex justify-between"><p className="font-bold">{labelFor(c.wilayat, c.institution)} — {c.period}</p><span className="font-black">{c.score}</span></div><p className="mt-1 text-sm [overflow-wrap:anywhere]">{c.comment || "No comment"}</p><p className="mt-1 text-xs text-[var(--muted)]">Audited by: {c.auditorName || "—"} · Added at: {c.auditedAt ? formatMuscat(c.auditedAt) : "—"} · {c.wilayat}</p></article>)}{planScores.filter(s => s.comment || s.auditorName).length === 0 && <p className="text-sm">No comments yet.</p>}</div>
-          </section>}
-        </>}
-
-        {tab !== "Control Panel" && tab !== "Guide" && part === "2" && <>
-          <section className="card mb-4 p-3 sm:p-4">
-            <div className="flex flex-wrap items-end gap-3">
-              <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Category</label><div className="mt-1 flex flex-wrap gap-1">{CATEGORIES.map(c => <button key={c} onClick={() => setCategory(c)} className={`rounded-full px-3 py-1.5 text-sm font-bold ${category === c ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{c}</button>)}</div></div>
-              <label className="min-w-[220px] flex-1 text-sm font-bold">Plan<select value={activeCompPlan?.id || ""} onChange={e => setCompPlanId(e.target.value)} className="mt-1 w-full"><option value="">No plan for this category</option>{compPlans.filter(p => p.category === category).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label>
-              {isAdmin && <label className="text-sm font-bold">Wilayat filter<select value={wilayatFilter} onChange={e => setWilayatFilter(e.target.value)} className="mt-1"><option value="All">All Wilayats</option>{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w} ({(effComp[w] || []).length})</option>)}</select></label>}
-              <label className="flex-1 min-w-[180px] text-sm font-bold"><span className="flex items-center gap-1"><Search size={14} /> Search institution</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. Suhar RMC" className="mt-1 w-full" /></label>
-              <div className="flex gap-2"><button onClick={exportCSV} disabled={!activeCompPlan} className="rounded-lg bg-[var(--blue)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Download className="mr-1 inline" size={16} />Export CSV</button></div>
-            </div>
-          </section>
-
-          {tab === "Dashboard" && <div>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button onClick={exportPart2StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--blue)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export Part 2 Statistics Excel</button>
-              <span className="self-center text-xs text-[var(--muted)]">{dbLabel} • clean names • real .xlsx</span>
-            </div>
-            <section className="card mt-4 p-4"><h2 className="flex items-center gap-2 font-extrabold"><BarChart3 size={18} /> Summary — {category}</h2><div className="mt-3 grid gap-2 sm:grid-cols-2"><div>Completion <strong>{compGridStats.completion.toFixed(1)}%</strong></div><div>Audits (blocks) <strong>{compGridStats.count}</strong></div><div>Average <strong>{compGridStats.avg ? compGridStats.avg.toFixed(2) + "%" : "—"}</strong></div><div>Missing <strong>{compGridStats.missing}</strong></div></div></section>
-          </div>}
-
-          {tab === "Audit Grid" && <section className="card p-3 sm:p-4">
-            <div className="mb-3 flex flex-wrap gap-4 text-sm"><span><strong>{category}</strong> · {activeCompPlan ? `${activeCompPlan.year} · Monthly · ${getBlocks(activeCompPlan).length} blocks` : "No plan"}</span><span>Completion <strong>{compGridStats.completion.toFixed(1)}%</strong></span><span>Audits <strong>{compGridStats.count}</strong></span><span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-800">{dbLabel}</span></div>
-            {!activeCompPlan ? <p className="text-sm text-[var(--muted)]">Select or create a plan to see the grid.</p> : <>
-              <p className="mb-2 rounded-lg bg-[var(--amber)] px-3 py-2 text-sm font-semibold">Tap a cell to enter score — block system: same procedure in consecutive months = one block. One score per block. Use top Refresh to get latest from Supabase.</p>
-              <div ref={gridRef} className="gridwrap">
-                <table className="excel">
-                  <thead><tr><th>Institution / Procedure block</th>{activeCompPlan.periods.map((p, i) => <th key={i}>{p}<span className="block text-[10px] font-normal">{activeCompPlan.feedback?.[i] ? "Feedback" : displayProcedure(activeCompPlan.procedures?.[i])}</span></th>)}</tr></thead>
-                  <tbody>
-                    {visibleCompInstitutions.map(v => {
-                      const isEditingRow = selectedCell && selectedCell.wilayat === v.wilayat && selectedCell.institution === v.institution && selectedCell.part === "2";
-                      return <tr key={v.wilayat + v.institution} className={isEditingRow ? "editing-row" : ""}>
-                        <td className="font-bold [overflow-wrap:anywhere]">{labelFor(v.wilayat, v.institution)}<span className="block text-xs font-normal text-[var(--muted)]">{v.wilayat}</span></td>
-                        {activeCompPlan.periods.map((period, idx) => {
-                          if (activeCompPlan.feedback?.[idx]) return <td key={idx} style={{ background: "#ede9fe" }}><span className="text-xs font-bold">Feedback</span></td>;
-                          if (!activeCompPlan.procedures?.[idx]) return <td key={idx}></td>;
-                          const block = blockForMonth(activeCompPlan, idx); if (!block) return <td key={idx}></td>;
-                          if (idx !== block.start) { const s = findBlockScore(v.wilayat, v.institution, block); return <td key={idx} style={s ? scoreColor(s.score) : {}}><span className="text-xs text-[var(--muted)]">{s ? `Covered — ${s.period}` : ""}</span></td>; }
-                          const s = findBlockScore(v.wilayat, v.institution, block);
-                          const isEditingCell = selectedCell && selectedCell.wilayat === v.wilayat && selectedCell.institution === v.institution && selectedCell.period === period;
-                          return <td key={idx} className={isEditingCell ? "editing-cell" : ""} style={s ? scoreColor(s.score) : {}} colSpan={block.end - block.start + 1}>
-                            <button
-                              type="button"
-                              onClick={() => openCell(v, period, "2", category)}
-                              className={`cellBtn ${s?.comment ? "hasComment" : ""}`}
-                              style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44 }}
-                              aria-label={`Edit ${labelFor(v.wilayat, v.institution)} ${blockLabel(block)} ${s?.score || "empty"}`}
-                            >
-                              {s ? s.score : "—"}
-                            </button>
-                          </td>;
-                        })}
-                      </tr>;
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>}
-          </section>}
-
-          {tab === "Comments" && <section className="card p-4"><h2 className="flex items-center gap-2 font-extrabold"><MessageSquare size={18} /> Comments — {category}</h2><p className="mt-1 text-sm text-[var(--muted)]">{dbLabel}</p>
-            <div className="mt-3 space-y-3">{compPlanScores.filter(s => s.comment || s.auditorName).map(c => <article key={c.id} className="rounded-xl border p-3"><div className="flex justify-between"><p className="font-bold">{labelFor(c.wilayat, c.institution)} — {c.period} — {displayProcedure(c.procedure)}</p><span className="font-black">{c.score}</span></div><p className="mt-1 text-sm [overflow-wrap:anywhere]">{c.comment || "No comment"}</p><p className="mt-1 text-xs text-[var(--muted)]">Audited by: {c.auditorName || "—"} · Added at: {c.auditedAt ? formatMuscat(c.auditedAt) : "—"} · {c.wilayat}</p></article>)}{compPlanScores.filter(s => s.comment || s.auditorName).length === 0 && <p className="text-sm">No comments yet.</p>}</div>
-          </section>}
-        </>}
-
-        {tab === "Plans" && isAdmin && <section className="card p-4">
-          <h2 className="text-xl font-black">Plans</h2><p className="mt-1 text-sm text-[var(--muted)]">Create Monthly plans (Jan-Dec). Plans are saved to Supabase audit_data + local backup. {dbLabel}</p>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <form onSubmit={createPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 1 plan</h3><label className="mt-3 block text-sm font-bold">Topic<select value={newPlan.topic} onChange={e => setNewPlan({ ...newPlan, topic: e.target.value })} className="mt-1 w-full">{TOPICS.map(t => <option key={t} value={t}>{t}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newPlan.year} onChange={e => setNewPlan({ ...newPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 1 plan</button></form>
-            <form onSubmit={createCompPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 2 plan</h3><label className="mt-3 block text-sm font-bold">Category<select value={newCompPlan.category} onChange={e => setNewCompPlan({ ...newCompPlan, category: e.target.value })} className="mt-1 w-full">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newCompPlan.year} onChange={e => setNewCompPlan({ ...newCompPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 2 plan</button></form>
-          </div>
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            <div><h3 className="font-extrabold">Part 1 plans ({plans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{plans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.topic} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : ""}</span><button type="button" onClick={() => { setTopic(p.topic); setPlanId(p.id); setTab("Audit Grid"); setPart("1"); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
-            <div><h3 className="font-extrabold">Part 2 plans ({compPlans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{compPlans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.category} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : ""} · {getBlocks(p).length} blocks</span><button type="button" onClick={() => { setCategory(p.category); setCompPlanId(p.id); setTab("Audit Grid"); setPart("2"); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
-          </div>
-        </section>}
-
-        {/* SCORE DIALOG - FIXED FOR MOBILE */}
-        {selectedCell && (
-          <div className="fixed inset-0 z-[9999] overflow-y-auto bg-black/50 pt-[max(1rem,var(--safe-area-inset-top))] pb-6">
-            <div className="min-h-full flex items-center justify-center px-3">
-              <div className="w-full max-w-md rounded-2xl bg-[var(--surface)] p-5 shadow-2xl sheet-up">
-                <div className="flex justify-between items-start gap-2">
-                  <div>
-                    <h3 className="text-lg font-black">Enter audit score</h3>
-                    <p className="mt-1 text-sm font-bold [overflow-wrap:anywhere]">{labelFor(selectedCell.wilayat, selectedCell.institution)} • {selectedCell.period} • {selectedCell.part === "2" ? (selectedCell.category || category) : topic}</p>
-                    <p className="text-xs text-[var(--muted)]">{selectedCell.wilayat} Wilayat • {isSupabaseConfigured ? "Will sync to Supabase" : "Will sync to local backup"}</p>
-                  </div>
-                  <button type="button" onClick={() => setSelectedCell(null)} aria-label="Close score dialog" className="rounded-full border p-1" style={{ minHeight: 44, minWidth: 44, touchAction: 'manipulation', cursor: 'pointer' }}><X size={18} /></button>
-                </div>
-                <div className="mt-4 space-y-3">
-                  <label className="block text-sm font-bold">Score <span className="text-red-600">* Mandatory</span> (0-100 or NA)
-                    <input
-                      value={scoreInput}
-                      onChange={e => setScoreInput(e.target.value)}
-                      placeholder="e.g. 95 or NA"
-                      inputMode="decimal"
-                      autoComplete="off"
-                      className={`mt-1 w-full ${!isScoreValid(scoreInput) && scoreInput !== "" ? "border-red-500" : ""}`}
-                      style={{ fontSize: 16, minHeight: 48 }}
-                    />
-                    <span className="mt-1 block text-[11px] text-[var(--muted)]">Mandatory — enter 0-100 or NA</span>
-                  </label>
-                  <label className="block text-sm font-bold">Your Name / Auditor Name <span className="text-red-600">* Mandatory</span>
-                    <input
-                      value={auditorNameInput}
-                      onChange={e => setAuditorNameInput(e.target.value)}
-                      placeholder="e.g. Salim Al Mamari"
-                      className={`mt-1 w-full ${!isNameValid(auditorNameInput) && auditorNameInput !== "" ? "border-red-500" : ""}`}
-                      style={{ fontSize: 16, minHeight: 48 }}
-                    />
-                    <span className="mt-1 block text-[11px] text-[var(--muted)]">Mandatory — will be shown as Audited by</span>
-                  </label>
-                  <label className="block text-sm font-bold">Comment <span className="text-[var(--muted)]">(Optional)</span>
-                    <textarea value={commentInput} onChange={e => setCommentInput(e.target.value)} rows={3} placeholder="Add a comment for this audit... (optional)" className="mt-1 w-full" style={{ fontSize: 16, minHeight: 80 }} />
-                  </label>
-                </div>
-                <div className="mt-2 rounded bg-white p-2 text-xs text-[var(--muted)]"><div className="font-bold text-[var(--ink)]">How it will appear:</div><div className="mt-1">Audited by: {auditorNameInput.trim() || "—"}</div><div>Added at: {formatMuscat(new Date().toISOString())}</div><div className="mt-1">{isSupabaseConfigured ? "Sync: Supabase audit_data + local backup" : "Sync: records API + local backup"}</div></div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={saveCell}
-                    disabled={busy || !isScoreValid(scoreInput) || !isNameValid(auditorNameInput)}
-                    className="rounded-lg bg-[var(--teal)] px-5 py-3 text-sm font-black text-white disabled:opacity-50"
-                    style={{ minHeight: 48, touchAction: 'manipulation', cursor: 'pointer' }}
-                  >
-                    <CheckCircle2 className="mr-1 inline" size={16} />{busy ? "Saving…" : "Save audit"}
-                  </button>
-                  <button type="button" onClick={() => setSelectedCell(null)} disabled={busy} className="rounded-lg border px-4 py-3 font-bold" style={{ minHeight: 48, touchAction: 'manipulation', cursor: 'pointer' }}>Cancel</button>
-                  <button type="button" onClick={deleteScore} disabled={busy} className="rounded-lg border border-red-300 px-3 py-3 font-bold text-red-700" style={{ minHeight: 48, touchAction: 'manipulation' }}><Trash2 className="mr-1 inline" size={16} />Remove</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Bottom nav for mobile */}
-        <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-20 border-t border-[var(--line)] bg-[var(--surface)] px-2 py-2 pb-[max(.5rem,var(--safe-area-inset-top))]">
-          <div className="flex justify-around gap-1">
-            <button onClick={() => setTab("Dashboard")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Dashboard" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><BarChart3 size={18} /><span>Dashboard</span></button>
-            <button onClick={() => setTab("Audit Grid")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Audit Grid" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><ClipboardCheck size={18} /><span>Grid</span></button>
-            <button type="button" onClick={manualRefresh} disabled={refreshing} title="Tap to refresh scores from database" className="flex flex-col items-center rounded-full bg-[var(--teal)] px-4 py-2 text-[11px] font-black text-white shadow border-2 border-white disabled:opacity-60" style={{ minHeight: 44, touchAction: 'manipulation', cursor: 'pointer' }}><RefreshCw size={18} className={refreshing ? "animate-spin" : ""} /><span>⟳ Refresh</span></button>
-            <button onClick={() => setTab("Comments")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Comments" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><MessageSquare size={18} /><span>Comments</span></button>
-            {isAdmin && <button onClick={() => setTab("Plans")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Plans" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><Settings2 size={18} /><span>Plans</span></button>}
-          </div>
-          <div className="mt-1 text-center text-[10px] font-semibold text-[var(--muted)]">{liveStatus === "refreshing" ? "Refreshing..." : dbLabel}</div>
-        </nav>
-
-        <button type="button" onClick={manualRefresh} disabled={refreshing} title="Tap to refresh scores from database" aria-label="Refresh scores from database" className="sm:hidden fixed bottom-[84px] right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--teal)] text-white shadow-xl border-2 border-white disabled:opacity-60" style={{ minHeight: 56, touchAction: 'manipulation', cursor: 'pointer' }}>
-          <RefreshCw size={22} className={refreshing ? "animate-spin" : ""} />
+  const SecondaryBar = (
+    <div className="noprint border-b border-[var(--line)] bg-[var(--surface)]">
+      <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-2 px-4 py-2.5">
+        <button
+          type="button"
+          onClick={manualRefresh}
+          disabled={refreshing}
+          className="flex min-h-[40px] items-center gap-2 rounded-full bg-[var(--teal)] px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-[var(--teal2)] disabled:opacity-60"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} /> Refresh
         </button>
-      </main>
-    </>
-    }
-    {showHelp && <div className="fixed inset-0 z-[9999] overflow-y-auto bg-black/50 pt-[max(1rem,var(--safe-area-inset-top))] pb-6"><div className="min-h-full flex items-center justify-center px-3"><div className="w-full max-w-xl rounded-2xl bg-[var(--surface)] p-5 shadow-2xl"><div className="flex justify-between"><h2 className="text-lg font-black">How to use — Monthly plans, blocks &amp; Feedback + Supabase sync</h2><button onClick={() => setShowHelp(false)} aria-label="Close help"><X /></button></div><ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-relaxed"><li><strong>Plans are Monthly:</strong> Jan–Dec, 12 months. Create a plan with Category/Topic + Year only.</li><li><strong>Part 2 blocks:</strong> Same procedure in consecutive months = one block. One score per block. Enter score in any month in block.</li><li><strong>Supabase sync — FIXED:</strong> All saves now go to Supabase audit_data table (id, data jsonb, updated_at) + records API fallback + localStorage backup. On startup app loads from Supabase first. Refresh button re-fetches from Supabase and shows toast "Live • Updated HH:MM:SS". Status top shows "Live • Supabase • Updated..." when VITE_SUPABASE_URL and KEY are set, else "Local mode". Suhar save now appears on other PC admin after Refresh or auto-load.</li><li><strong>Mobile tap — FIXED:</strong> Grid cells are now &lt;button type="button"&gt; with touch-action: manipulation, cursor pointer, min-height 44px. Tap opens fixed z-index 9999 dialog that works in portrait and landscape. Inputs: score (text inputMode decimal, allows NA), auditor name mandatory, comment optional. Save closes and updates grid immediately and upserts to Supabase.</li><li><strong>Score dialog:</strong> Fixed position, high z-index, scrollable, Save button.</li><li><strong>CSV / Excel export:</strong> Includes Audited by, Added at Muscat, Added at ISO.</li></ol><button onClick={() => setShowHelp(false)} className="mt-4 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white">Got it</button></div></div></div>}
-  </div>;
+        <div className="flex flex-wrap items-center gap-2">
+          {liveStatus === "refreshing" ? (
+            <span className="flex items-center gap-1.5 rounded-full bg-[var(--surface2)] px-3 py-1.5 text-xs font-bold"><RefreshCw size={12} className="animate-spin" />Refreshing...</span>
+          ) : isSupabaseConfigured && supabaseConnected ? (
+            <span className="flex items-center gap-1.5 rounded-full bg-[var(--surface2)] px-3 py-1.5 text-xs font-bold"><span className="h-2.5 w-2.5 rounded-full bg-green-500" />Live • Supabase • Connected</span>
+          ) : isSupabaseConfigured ? (
+            <span className="flex items-center gap-2"><span className="flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1.5 text-xs font-bold text-red-800"><span className="h-2.5 w-2.5 rounded-full bg-red-500" />Local only • Supabase not connected: {supabaseReason || "unknown"}</span><button type="button" onClick={manualRefresh} disabled={refreshing} className="rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white">Retry</button></span>
+          ) : (
+            <span className="flex items-center gap-1.5 rounded-full bg-[var(--surface2)] px-3 py-1.5 text-xs font-bold"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />Local mode</span>
+          )}
+        </div>
+        <div className="ml-auto hidden text-[11px] font-semibold text-[var(--muted)] sm:block">Tap Refresh to load latest scores — shared link works on any phone</div>
+      </div>
+    </div>
+  );
+
+  const PartTabsBar = (
+    <div className="noprint border-b border-[var(--line)] bg-[var(--surface2)]">
+      <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-2 px-4 py-2.5">
+        <div className="flex gap-2">
+          <button onClick={() => { setPart("1"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "1"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "1" ? "bg-[var(--teal)] text-white" : "bg-white border border-[var(--line)] text-[var(--ink)]"}`}>Part 1 — Documentation</button>
+          <button onClick={() => { setPart("2"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "2"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "2" ? "bg-[var(--teal)] text-white" : "bg-white border border-[var(--line)] text-[var(--ink)]"}`}>Part 2 — Competency</button>
+        </div>
+        <div className="ml-2 hidden h-6 w-px bg-[var(--line)] sm:block" />
+        <nav className="no-scrollbar flex flex-nowrap gap-1 overflow-x-auto sm:flex-wrap sm:overflow-visible">
+          {tabs.map(t => (
+            <button key={t} onClick={() => setTab(t)} className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold ${tab === t ? "bg-[var(--ink)] text-white" : "bg-white border border-[var(--line)] text-[var(--ink)] hover:bg-[var(--surface)]"}`}>{t}</button>
+          ))}
+        </nav>
+      </div>
+    </div>
+  );
+
+  return (
+    <div data-safe-area-inset-root style={{ boxSizing: "border-box", paddingTop: "var(--safe-area-inset-top)", minHeight: "100vh", background: "var(--bg)" }} className="overflow-x-clip">
+      {!user ? (
+        <div className="mx-auto max-w-6xl px-3 py-6 sm:px-6">
+          <div className="mb-5 flex flex-col items-center text-center">
+            <div className="rounded-2xl bg-white p-3 shadow-sm"><img src={mohLogo} alt="Ministry of Health logo" className="h-[76px] w-auto object-contain sm:h-[84px]" /></div>
+            <p className="mt-3 text-xs font-bold tracking-[.2em] uppercase text-[var(--muted)]">Directorate of Health Services</p>
+            <h1 className="mt-2 text-[clamp(1.8rem,5vw,2.8rem)] font-black leading-[1.05]">North Al Batinah — Nursing Audit System</h1>
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface)]">
+            <div className="grid md:grid-cols-2">
+              <div className="flex flex-col bg-[var(--teal)] p-6 text-white sm:p-8">
+                <p className="mt-4 max-w-md text-white/90">Submit audit results by plan, keep comments with every score, and see completion and averages update as Wilayats enter their work.</p>
+                <div className="mt-8 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-xl bg-white/15 p-3"><div className="text-2xl font-black">{part1Total}</div><div className="text-xs">Institutions</div></div>
+                  <div className="rounded-xl bg-white/15 p-3"><div className="text-2xl font-black">6</div><div className="text-xs">Wilayats</div></div>
+                  <div className="rounded-xl bg-white/15 p-3"><div className="text-2xl font-black">4</div><div className="text-xs">Topics</div></div>
+                </div>
+                <div className="mt-6 text-sm text-white/85"><strong>Wilayats:</strong> {WILAYAT_ORDER.map(w => `${w} (${(effPart1[w] || []).length})`).join(" · ")}</div>
+                <div className="mt-4 rounded-xl bg-white/10 p-3 text-sm"><strong>Part 2 — Competency Procedures:</strong> General Nursing, Renal Medicine Center, Labour Rooms. Same logins, separate plans and scores.</div>
+                <p className="mt-auto pt-6 text-center text-sm font-bold text-white">Brought to you by: Juma Al Marzouqi [Saham Hospital]</p>
+                <p className="mt-3 text-center text-xs text-white/70">{isSupabaseConfigured ? "Live • Supabase • Shared Database" : "Local mode — add VITE_SUPABASE env to enable cross-PC sync"}</p>
+              </div>
+              <div className="p-5 sm:p-7">
+                <h2 className="text-xl font-extrabold">Sign in</h2><p className="text-sm text-[var(--muted)]">Choose a demo account, or type a username and password.</p>
+                <form onSubmit={login} className="mt-4 space-y-3">
+                  <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="username" /></label>
+                  <label className="block text-sm font-bold">Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} className="mt-1 w-full" autoComplete="current-password" /></label>
+                  {security.locked && <label className="block text-sm font-bold">Recovery Code <span className="text-red-600">* Required for Master Unlock</span><input type="password" value={recoveryInput} onChange={e => setRecoveryInput(e.target.value)} className="mt-1 w-full" placeholder="Recovery Code set by Master" autoComplete="off" /></label>}
+                  {security.accessCodeEnabled && <label className="block text-sm font-bold">Directorate Access Code <span className="text-red-600">* Required</span><input type="password" value={accessCodeInput} onChange={e => setAccessCodeInput(e.target.value)} className="mt-1 w-full" placeholder="Directorate Access Code" autoComplete="off" /></label>}
+                  {loginError && <p className="rounded-lg bg-[var(--red)] p-2 text-sm font-semibold">{loginError}</p>}
+                  <button className="w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white">{security.locked ? "Master Unlock" : "Sign in"}</button>
+                </form>
+                <div className="mt-5">
+                  <p className="mt-3 text-xs font-bold uppercase tracking-wider text-[var(--muted)]">Demo logins — tap to fill</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {effectiveUsers.map(u => <button key={u.username} onClick={() => { setUsername(u.username); setPassword(u.password); }} className="rounded-lg border border-[var(--line)] px-2 py-2 text-left text-sm hover:bg-[var(--surface2)]">
+                      <span className="block font-bold capitalize">{u.label} {u.role === "Wilayat" ? "— Wilayat" : ""}</span>
+                      <span className="text-xs text-[var(--muted)]">{u.username} · {u.password}</span>
+                    </button>)}
+                  </div>
+                </div>
+                <p className="mt-4 text-xs leading-relaxed text-[var(--muted)]">Demo accounts are for this preview. Wilayat users only see their own Wilayat. Admin sees all Wilayats and can manage plans and Wilayat passwords. Master sees all and controls access. {isSupabaseConfigured ? "Supabase sync enabled — saves appear on other PCs." : "Supabase not configured — using the shared records API."}</p>
+                <p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">Use the in-app Refresh button to get the latest data — it re-fetches only, never reloads the page, and never logs you out. Your sign-in (username + session version only, never password) is saved to the shared backend, so a browser refresh restores your session on Dashboard.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {CompactHeader}
+          {SecondaryBar}
+          {PartTabsBar}
+
+          <main className="mx-auto max-w-[1500px] px-3 py-4 pb-36 sm:px-5 sm:py-6 sm:pb-6">
+            {liveToast && <div role="status" className="mb-4 flex items-start justify-between gap-2 rounded-xl border border-[var(--teal)] bg-[var(--surface)] p-3 text-sm font-bold shadow"><span>{liveToast}</span><button type="button" onClick={() => setLiveToast(null)} aria-label="Dismiss notification" className="shrink-0 rounded-full border px-2 py-0.5 text-xs">Dismiss</button></div>}
+            {saveMsg && <div className="mb-4 rounded-xl bg-[var(--surface2)] p-3 text-sm font-semibold">{saveMsg}</div>}
+            {backendError && <div className="mb-4 rounded-xl bg-[var(--red)] p-3 text-sm font-bold">{backendError}</div>}
+
+            {tab === "Control Panel" && isAdmin && (
+              <section>
+                <h2 className="text-xl font-black">Control Panel</h2>
+                <p className="mt-1 text-sm text-[var(--muted)]">Same panel in Part 1 and Part 2. Passwords, institutions, and procedures are saved in the shared database (audit_data) and apply immediately. {dbLabel}</p>
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <div className="card p-4"><h3 className="flex items-center gap-2 font-extrabold"><Users size={18} /> Accounts</h3><div className="mt-3 space-y-2">{effectiveUsers.map(u => <div key={u.username} className="flex justify-between gap-2 rounded-lg border p-3 text-sm"><span><strong>{u.label}</strong> — {u.username} · {u.role} · {u.wilayat}</span><span className="text-[var(--muted)]">Password: {u.password}</span></div>)}</div></div>
+                  <form onSubmit={changePassword} className="card p-4"><h3 className="font-extrabold">Change a password</h3><label className="mt-3 block text-sm font-bold">Account<select value={pwdForm.username} onChange={e => setPwdForm({ ...pwdForm, username: e.target.value })} className="mt-1 w-full">{effectiveUsers.filter(u => isMaster || u.username !== "master").map(u => <option key={u.username} value={u.username}>{u.label} ({u.username}) — {u.role}</option>)}</select></label><label className="mt-3 block text-sm font-bold">New password<div className="mt-1 flex gap-2"><input type={showPwd ? "text" : "password"} value={pwdForm.password} onChange={e => setPwdForm({ ...pwdForm, password: e.target.value })} className="flex-1" placeholder="At least 4 characters" /><button type="button" onClick={() => setShowPwd(!showPwd)} className="rounded-lg border px-3 text-sm font-bold" aria-label={showPwd ? "Hide password" : "Show password"}>{showPwd ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><label className="mt-3 block text-sm font-bold">Confirm new password<input type={showPwd ? "text" : "password"} value={pwdConfirm} onChange={e => setPwdConfirm(e.target.value)} className="mt-1 w-full" placeholder="Re-enter new password" /></label>{pwdMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{pwdMsg}</p>}<button disabled={busy} className="mt-4 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Update password</button></form>
+                </div>
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <form onSubmit={saveInstitution} className="card p-4"><h3 className="font-extrabold">{editingInst ? "Edit institution" : "Add institution"}</h3><label className="mt-3 block text-sm font-bold">Wilayat<select value={instForm.wilayat} onChange={e => setInstForm({ ...instForm, wilayat: e.target.value })} className="mt-1 w-full">{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Institution name<input value={instForm.name} onChange={e => setInstForm({ ...instForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. Khaboorah EHC" /></label><fieldset className="mt-3"><legend className="text-sm font-bold">Assignments</legend>{["Part 1", "General Nursing", "Renal Medicine Center", "Labour Rooms"].map(a => <label key={a} className="mt-2 flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={instForm.assignments.includes(a)} onChange={() => toggleInstAssignment(a)} className="w-auto" /> {a}</label>)}</fieldset>{instMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{instMsg}</p>}<div className="mt-4 flex gap-2"><button disabled={busy} className="flex-1 rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingInst ? "Save changes" : "Add institution"}</button>{editingInst && <button type="button" onClick={() => { setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"] }); }} className="rounded-lg border px-3 py-2 font-bold">Cancel</button>}</div></form>
+                  <div className="card p-4"><h3 className="font-extrabold">Institutions ({effInstList.length})</h3><div className="mt-3 space-y-2 max-h-[420px] overflow-auto">{WILAYAT_ORDER.map(w => { const items = effInstList.filter(e => e.wilayat === w); if (!items.length) return null; return <div key={w}><h4 className="font-bold">{w} — {items.length}</h4><div className="mt-1 space-y-1">{items.map(e => <div key={e.wilayat + e.institution} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold [overflow-wrap:anywhere]">{e.institution}</span><span className="text-xs text-[var(--muted)]">{e.assignments.join(" · ")}</span><button type="button" onClick={() => { setEditingInst(e); setInstForm({ wilayat: e.wilayat, name: e.institution, assignments: [...e.assignments] }); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Edit</button></div>)}</div></div>; })}</div></div>
+                </div>
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <form onSubmit={saveProcedure} className="card p-4"><h3 className="font-extrabold">{editingProc ? "Edit procedure" : "Add procedure"}</h3><label className="mt-3 block text-sm font-bold">Procedure name<input value={procForm.name} onChange={e => setProcForm({ ...procForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. IV Cannulation" /></label><label className="mt-3 block text-sm font-bold">Tag<select value={procForm.tag} onChange={e => setProcForm({ ...procForm, tag: e.target.value })} className="mt-1 w-full"><option value="General">General</option><option value="LR">[LR]</option><option value="RMC">[RMC]</option></select></label>{procMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{procMsg}</p>}<button disabled={busy} className="mt-4 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingProc ? "Save changes" : "Add procedure"}</button></form>
+                  <div className="card p-4"><h3 className="font-extrabold">Procedures ({effectiveProcedures.length})</h3><div className="mt-3 flex gap-2"><input value={procSearch} onChange={e => setProcSearch(e.target.value)} placeholder="Search..." className="flex-1 text-sm" /><select value={procFilterTag} onChange={e => setProcFilterTag(e.target.value)} className="text-sm"><option value="All">All</option><option value="General">General</option><option value="LR">[LR]</option><option value="RMC">[RMC]</option></select></div><div className="mt-3 max-h-[420px] space-y-1 overflow-auto">{effectiveProcedures.filter(p => { if (procFilterTag !== "All" && procTag(p) !== procFilterTag) return false; if (procSearch && !p.toLowerCase().includes(procSearch.toLowerCase())) return false; return true; }).map(p => <div key={p} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="chip bg-[var(--surface2)]">{procTag(p)}</span><span className="font-semibold [overflow-wrap:anywhere]">{p}</span><button type="button" onClick={() => { setEditingProc({ name: p }); setProcForm({ name: p, tag: procTag(p) }); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Edit</button></div>)}</div></div>
+                </div>
+              </section>
+            )}
+
+            {tab === "Guide" && <section className="mx-auto max-w-[720px]"><div className="card p-4 sm:p-6"><h2 className="text-[clamp(1.4rem,5vw,1.9rem)] font-black leading-tight">Wilayat Quick Guide — How to Enter Scores on Your Phone</h2><p className="mt-2 text-[15px] text-[var(--muted)]">Simple steps for Wilayat users on a small phone.</p><div className="mt-5 space-y-5 text-[16px] leading-[1.5]"><div className="rounded-xl border bg-[var(--surface2)] p-4"><p className="font-black">Step 1: Open shared link</p><p className="mt-2">Open shared link on phone, log in with Wilayat account, e.g. suhar / suhar123. If no Refresh button, pull down to refresh.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 2: Choose Part</p><p>Choose Part 1 or Part 2 at top.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 3: Year and Topic/Category</p><p>Choose Year and Topic or Category — e.g. 2027 + Crash Cart.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 4: Audit Grid months</p><p>Swipe sideways to see months Jan-Dec. Turn ON Single month view for easiest entry.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 5: Tap a cell</p><p>Tap a cell, e.g. Saham Hospital • Jan. Bottom sheet opens: Score 0-100 or NA, Your Name mandatory, Comment optional, Save.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 6: Refresh</p><p>Tap Refresh at top to see latest scores from other Wilayats. Live status shows updated time. Supabase sync: Phone A saves → Phone B taps Refresh → sees score.</p></div></div><pre className="mt-4 whitespace-pre-wrap break-words text-[14px] bg-[var(--surface2)] p-3 rounded-xl">{GUIDE_TEXT}</pre></div></section>}
+
+            {tab !== "Control Panel" && tab !== "Guide" && part === "1" && <>
+              <section className="card mb-4 p-3 sm:p-4">
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                  <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Topic</label><div className="mt-1 flex flex-wrap gap-1">{TOPICS.map(t => <button key={t} onClick={() => setTopic(t)} className={`rounded-full px-3 py-1.5 text-sm font-bold ${topic === t ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{t}</button>)}</div></div>
+                  <label className="text-sm font-bold">Plan<select value={activePlan?.id || ""} onChange={e => setPlanId(e.target.value)} className="mt-1 w-full"><option value="">No plan for this topic</option>{plans.filter(p => p.topic === topic).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label>
+                  <div className="flex flex-wrap items-end gap-2">
+                    {isAdmin && <label className="flex-1 text-sm font-bold">Wilayat filter<select value={wilayatFilter} onChange={e => setWilayatFilter(e.target.value)} className="mt-1 w-full"><option value="All">All Wilayats</option>{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w} ({(effPart1[w] || []).length})</option>)}</select></label>}
+                    <label className="flex-1 min-w-[180px] text-sm font-bold"><span className="flex items-center gap-1"><Search size={14} /> Search</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. Suhar EHC" className="mt-1 w-full" /></label>
+                    <div className="flex gap-2"><button onClick={exportCSV} disabled={!activePlan} className="rounded-lg bg-[var(--blue)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Download className="mr-1 inline" size={16} />CSV</button><button onClick={() => setTab("Dashboard")} className="rounded-lg border px-3 py-2 text-sm font-bold">Dashboard</button></div>
+                  </div>
+                </div>
+                {!activePlan && <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">No plan yet for <strong>{topic}</strong>. {isAdmin ? "Create one in Plans." : "Ask Admin to create a plan."}</div>}
+              </section>
+
+              {tab === "Dashboard" && <div>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {isAdmin ? <>
+                    <button onClick={exportPart1StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--teal)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export Part 1 Statistics Excel</button>
+                    <button onClick={exportPart2StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--blue)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export Part 2 Statistics Excel</button>
+                  </> : <button onClick={exportPart1StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--teal)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export My Statistics Excel</button>}
+                  <span className="self-center text-xs text-[var(--muted)]">{dbLabel} • Asia/Muscat • real .xlsx</span>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <section className="card p-4 lg:col-span-2"><h2 className="flex items-center gap-2 font-extrabold"><BarChart3 size={18} /> Summary — {topic}</h2><div className="mt-3 grid gap-3 sm:grid-cols-2"> <div className="rounded-xl bg-[var(--surface2)] p-3"><div className="text-xs text-[var(--muted)]">Completion</div><div className="text-xl font-black">{gridStats.completion.toFixed(1)}%</div></div><div className="rounded-xl bg-[var(--surface2)] p-3"><div className="text-xs text-[var(--muted)]">Audits</div><div className="text-xl font-black">{gridStats.count}</div></div><div className="rounded-xl bg-[var(--surface2)] p-3"><div className="text-xs text-[var(--muted)]">Average</div><div className="text-xl font-black">{gridStats.avg ? gridStats.avg.toFixed(2) + "%" : "—"}</div></div><div className="rounded-xl bg-[var(--surface2)] p-3"><div className="text-xs text-[var(--muted)]">Missing</div><div className="text-xl font-black">{gridStats.missing}</div></div></div></section>
+                  <section className="card p-4"><h3 className="font-bold">Sync status</h3><p className="mt-2 text-sm"><strong>Last sync:</strong> {lastSyncAt ? formatMuscat(lastSyncAt) : "—"}</p><p className="mt-1 text-sm"><strong>Supabase connected:</strong> {isSupabaseConfigured && supabaseConnected ? "Yes" : "No"}{isSupabaseConfigured && !supabaseConnected && supabaseReason ? ` — ${supabaseReason}` : ""}</p><p className="mt-1 text-sm"><strong>Rows loaded:</strong> {syncRowsLoaded}</p>{isSupabaseConfigured && !supabaseConnected && <button type="button" onClick={manualRefresh} disabled={refreshing} className="mt-3 rounded-lg bg-red-600 px-3 py-2 text-sm font-bold text-white">Retry sync</button>}<p className="mt-2 text-xs text-[var(--muted)]">{dbLabel}</p></section>
+                </div>
+              </div>}
+
+              {tab === "Audit Grid" && <section className="card p-3 sm:p-4">
+                <div className="mb-3 flex flex-wrap gap-4 text-sm"><span><strong>{topic}</strong> · {activePlan ? `${activePlan.year} · Monthly · 12 months` : "No plan"}</span><span>Completion <strong>{gridStats.completion.toFixed(1)}%</strong></span><span>Audits <strong>{gridStats.count}</strong></span><span>Average <strong>{gridStats.avg ? gridStats.avg.toFixed(2) + "%" : "—"}</strong></span><span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-800">{dbLabel}</span></div>
+                {!activePlan ? <p className="text-sm text-[var(--muted)]">Select or create a plan to see the grid.</p> : <>
+                  <p className="mb-2 rounded-lg bg-[var(--amber)] px-3 py-2 text-sm font-semibold">Tap a cell to enter score — row stays highlighted until you Save. Score and Auditor Name are mandatory. Use top Refresh to get latest from Supabase shared database.</p>
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <label className="w-full text-sm font-bold sm:w-auto">Jump to institution<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search institution…" className="mt-1 w-full sm:w-[220px]" /></label>
+                    <button type="button" onClick={() => setSingleMonthView(!singleMonthView)} aria-pressed={singleMonthView} className={`rounded-full px-4 py-2 text-sm font-bold ${singleMonthView ? "bg-[var(--teal)] text-white" : "border bg-white"}`}>{singleMonthView ? "Single month view: ON" : "Single month view: OFF"}</button>
+                  </div>
+                  <div className="mb-2"><label className="text-xs font-bold uppercase text-[var(--muted)]">Month picker</label><div className="no-scrollbar mt-1 flex gap-1 overflow-x-auto pb-1" role="tablist" aria-label="Month picker">{MONTHS.map((m, mi) => <button key={m} type="button" onClick={() => { setMobileMonthIdx(mi); const el = gridRef.current?.querySelector(`[data-month="${m}"]`); if (gridRef.current && el) gridRef.current.scrollLeft = Math.max(0, (el as HTMLElement).offsetLeft - 180); }} aria-pressed={mobileMonthIdx === mi} className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-bold ${mobileMonthIdx === mi ? "bg-[var(--teal)] text-white" : "border bg-white"}`}>{m}</button>)}</div></div>
+                  <p className="mb-2 text-sm font-semibold">← Swipe to see months on mobile → Desktop shows full table</p>
+                  <div ref={gridRef} className="gridwrap">
+                    <table className="excel">
+                      <thead><tr><th>Institution</th>{(singleMonthView ? [MONTHS[mobileMonthIdx]] : MONTHS).map(m => <th key={m} data-month={m}>{m}</th>)}</tr></thead>
+                      <tbody>
+                        {visibleInstitutions.map(v => {
+                          const isEditingRow = selectedCell && selectedCell.wilayat === v.wilayat && selectedCell.institution === v.institution && selectedCell.part !== "2";
+                          return <tr key={v.wilayat + v.institution} className={isEditingRow ? "editing-row" : ""}>
+                            <td className="font-bold [overflow-wrap:anywhere]">{labelFor(v.wilayat, v.institution)}<span className="block text-xs font-normal text-[var(--muted)]">{v.wilayat}</span></td>
+                            {(singleMonthView ? [MONTHS[mobileMonthIdx]] : MONTHS).map(period => {
+                              const s = findScore(v.wilayat, v.institution, period);
+                              const isEditingCell = selectedCell && selectedCell.wilayat === v.wilayat && selectedCell.institution === v.institution && selectedCell.period === period && selectedCell.part !== "2";
+                              return <td key={period} className={isEditingCell ? "editing-cell" : ""} style={s ? scoreColor(s.score) : {}}>
+                                <button
+                                  type="button"
+                                  onClick={() => openCell(v, period)}
+                                  className={`cellBtn ${s?.comment ? "hasComment" : ""}`}
+                                  style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44 }}
+                                  aria-label={`Edit ${labelFor(v.wilayat, v.institution)} ${period} score ${s?.score || "empty"}`}
+                                >
+                                  {s ? s.score : "—"}
+                                </button>
+                              </td>;
+                            })}
+                          </tr>;
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {visibleInstitutions.length === 0 && <p className="mt-3 text-sm text-[var(--muted)]">No institutions match your filter.</p>}
+                </>}
+              </section>}
+
+              {tab === "Comments" && <section className="card p-4"><h2 className="flex items-center gap-2 font-extrabold"><MessageSquare size={18} /> Comments — {topic}</h2><p className="mt-1 text-sm text-[var(--muted)]">{dbLabel}</p>
+                <div className="mt-3 space-y-3">{planScores.filter(s => s.comment || s.auditorName).map(c => <article key={c.id} className="rounded-xl border p-3"><div className="flex justify-between"><p className="font-bold">{labelFor(c.wilayat, c.institution)} — {c.period}</p><span className="font-black">{c.score}</span></div><p className="mt-1 text-sm [overflow-wrap:anywhere]">{c.comment || "No comment"}</p><p className="mt-1 text-xs text-[var(--muted)]">Audited by: {c.auditorName || "—"} · Added at: {c.auditedAt ? formatMuscat(c.auditedAt) : "—"} · {c.wilayat}</p></article>)}{planScores.filter(s => s.comment || s.auditorName).length === 0 && <p className="text-sm">No comments yet.</p>}</div>
+              </section>}
+            </>}
+
+            {tab !== "Control Panel" && tab !== "Guide" && part === "2" && <>
+              <section className="card mb-4 p-3 sm:p-4">
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                  <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Category</label><div className="mt-1 flex flex-wrap gap-1">{CATEGORIES.map(c => <button key={c} onClick={() => setCategory(c)} className={`rounded-full px-3 py-1.5 text-sm font-bold ${category === c ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{c}</button>)}</div></div>
+                  <label className="text-sm font-bold">Plan<select value={activeCompPlan?.id || ""} onChange={e => setCompPlanId(e.target.value)} className="mt-1 w-full"><option value="">No plan for this category</option>{compPlans.filter(p => p.category === category).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label>
+                  <div className="flex flex-wrap items-end gap-2">
+                    {isAdmin && <label className="flex-1 text-sm font-bold">Wilayat filter<select value={wilayatFilter} onChange={e => setWilayatFilter(e.target.value)} className="mt-1 w-full"><option value="All">All Wilayats</option>{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w} ({(effComp[category] || []).length})</option>)}</select></label>}
+                    <label className="flex-1 min-w-[180px] text-sm font-bold"><span className="flex items-center gap-1"><Search size={14} /> Search</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. Suhar RMC" className="mt-1 w-full" /></label>
+                    <button onClick={exportCSV} disabled={!activeCompPlan} className="rounded-lg bg-[var(--blue)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Download className="mr-1 inline" size={16} />CSV</button>
+                  </div>
+                </div>
+              </section>
+
+              {tab === "Dashboard" && <div>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button onClick={exportPart2StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--blue)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export Part 2 Statistics Excel</button>
+                  <span className="self-center text-xs text-[var(--muted)]">{dbLabel} • real .xlsx</span>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <section className="card p-4 lg:col-span-2"><h2 className="flex items-center gap-2 font-extrabold"><BarChart3 size={18} /> Summary — {category}</h2><div className="mt-3 grid gap-3 sm:grid-cols-2"><div className="rounded-xl bg-[var(--surface2)] p-3"><div className="text-xs text-[var(--muted)]">Completion</div><div className="text-xl font-black">{compGridStats.completion.toFixed(1)}%</div></div><div className="rounded-xl bg-[var(--surface2)] p-3"><div className="text-xs text-[var(--muted)]">Audits (blocks)</div><div className="text-xl font-black">{compGridStats.count}</div></div><div className="rounded-xl bg-[var(--surface2)] p-3"><div className="text-xs text-[var(--muted)]">Average</div><div className="text-xl font-black">{compGridStats.avg ? compGridStats.avg.toFixed(2) + "%" : "—"}</div></div><div className="rounded-xl bg-[var(--surface2)] p-3"><div className="text-xs text-[var(--muted)]">Missing</div><div className="text-xl font-black">{compGridStats.missing}</div></div></div></section>
+                  <section className="card p-4"><h3 className="font-bold">Blocks</h3><p className="mt-2 text-sm">Part 2 uses block system: same procedure in consecutive months = one block, one score per block.</p><div className="mt-3 border-t pt-3"><h4 className="font-bold">Sync status</h4><p className="mt-1 text-sm"><strong>Last sync:</strong> {lastSyncAt ? formatMuscat(lastSyncAt) : "—"}</p><p className="mt-1 text-sm"><strong>Supabase connected:</strong> {isSupabaseConfigured && supabaseConnected ? "Yes" : "No"}{isSupabaseConfigured && !supabaseConnected && supabaseReason ? ` — ${supabaseReason}` : ""}</p><p className="mt-1 text-sm"><strong>Rows loaded:</strong> {syncRowsLoaded}</p>{isSupabaseConfigured && !supabaseConnected && <button type="button" onClick={manualRefresh} disabled={refreshing} className="mt-3 rounded-lg bg-red-600 px-3 py-2 text-sm font-bold text-white">Retry sync</button>}</div></section>
+                </div>
+              </div>}
+
+              {tab === "Audit Grid" && <section className="card p-3 sm:p-4">
+                <div className="mb-3 flex flex-wrap gap-4 text-sm"><span><strong>{category}</strong> · {activeCompPlan ? `${activeCompPlan.year} · Monthly · ${getBlocks(activeCompPlan).length} blocks` : "No plan"}</span><span>Completion <strong>{compGridStats.completion.toFixed(1)}%</strong></span><span>Audits <strong>{compGridStats.count}</strong></span><span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-800">{dbLabel}</span></div>
+                {!activeCompPlan ? <p className="text-sm text-[var(--muted)]">Select or create a plan to see the grid.</p> : <>
+                  <p className="mb-2 rounded-lg bg-[var(--amber)] px-3 py-2 text-sm font-semibold">Tap a cell to enter score — block system: same procedure in consecutive months = one block. One score per block. Use top Refresh to get latest from Supabase.</p>
+                  <div ref={gridRef} className="gridwrap">
+                    <table className="excel">
+                      <thead><tr><th>Institution / Procedure block</th>{activeCompPlan.periods.map((p, i) => <th key={i}>{p}<span className="block text-[10px] font-normal">{activeCompPlan.feedback?.[i] ? "Feedback" : displayProcedure(activeCompPlan.procedures?.[i])}</span></th>)}</tr></thead>
+                      <tbody>
+                        {visibleCompInstitutions.map(v => {
+                          const isEditingRow = selectedCell && selectedCell.wilayat === v.wilayat && selectedCell.institution === v.institution && selectedCell.part === "2";
+                          return <tr key={v.wilayat + v.institution} className={isEditingRow ? "editing-row" : ""}>
+                            <td className="font-bold [overflow-wrap:anywhere]">{labelFor(v.wilayat, v.institution)}<span className="block text-xs font-normal text-[var(--muted)]">{v.wilayat}</span></td>
+                            {activeCompPlan.periods.map((period, idx) => {
+                              if (activeCompPlan.feedback?.[idx]) return <td key={idx} style={{ background: "#ede9fe" }}><span className="text-xs font-bold">Feedback</span></td>;
+                              if (!activeCompPlan.procedures?.[idx]) return <td key={idx}></td>;
+                              const block = blockForMonth(activeCompPlan, idx); if (!block) return <td key={idx}></td>;
+                              if (idx !== block.start) { const s = findBlockScore(v.wilayat, v.institution, block); return <td key={idx} style={s ? scoreColor(s.score) : {}}><span className="text-xs text-[var(--muted)]">{s ? `Covered — ${s.period}` : ""}</span></td>; }
+                              const s = findBlockScore(v.wilayat, v.institution, block);
+                              const isEditingCell = selectedCell && selectedCell.wilayat === v.wilayat && selectedCell.institution === v.institution && selectedCell.period === period;
+                              return <td key={idx} className={isEditingCell ? "editing-cell" : ""} style={s ? scoreColor(s.score) : {}} colSpan={block.end - block.start + 1}>
+                                <button
+                                  type="button"
+                                  onClick={() => openCell(v, period, "2", category)}
+                                  className={`cellBtn ${s?.comment ? "hasComment" : ""}`}
+                                  style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44 }}
+                                  aria-label={`Edit ${labelFor(v.wilayat, v.institution)} ${blockLabel(block)} ${s?.score || "empty"}`}
+                                >
+                                  {s ? s.score : "—"}
+                                </button>
+                              </td>;
+                            })}
+                          </tr>;
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>}
+              </section>}
+
+              {tab === "Comments" && <section className="card p-4"><h2 className="flex items-center gap-2 font-extrabold"><MessageSquare size={18} /> Comments — {category}</h2><p className="mt-1 text-sm text-[var(--muted)]">{dbLabel}</p>
+                <div className="mt-3 space-y-3">{compPlanScores.filter(s => s.comment || s.auditorName).map(c => <article key={c.id} className="rounded-xl border p-3"><div className="flex justify-between"><p className="font-bold">{labelFor(c.wilayat, c.institution)} — {c.period} — {displayProcedure(c.procedure)}</p><span className="font-black">{c.score}</span></div><p className="mt-1 text-sm [overflow-wrap:anywhere]">{c.comment || "No comment"}</p><p className="mt-1 text-xs text-[var(--muted)]">Audited by: {c.auditorName || "—"} · Added at: {c.auditedAt ? formatMuscat(c.auditedAt) : "—"} · {c.wilayat}</p></article>)}{compPlanScores.filter(s => s.comment || s.auditorName).length === 0 && <p className="text-sm">No comments yet.</p>}</div>
+              </section>}
+            </>}
+
+            {tab === "Plans" && isAdmin && <section className="card p-4">
+              <h2 className="text-xl font-black">Plans</h2><p className="mt-1 text-sm text-[var(--muted)]">Create Monthly plans (Jan-Dec). Plans are saved to the shared audit_data table — only the changed plan row is upserted. {dbLabel}</p>
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <form onSubmit={createPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 1 plan</h3><label className="mt-3 block text-sm font-bold">Topic<select value={newPlan.topic} onChange={e => setNewPlan({ ...newPlan, topic: e.target.value })} className="mt-1 w-full">{TOPICS.map(t => <option key={t} value={t}>{t}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newPlan.year} onChange={e => setNewPlan({ ...newPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 1 plan</button></form>
+                <form onSubmit={createCompPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 2 plan</h3><label className="mt-3 block text-sm font-bold">Category<select value={newCompPlan.category} onChange={e => setNewCompPlan({ ...newCompPlan, category: e.target.value })} className="mt-1 w-full">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newCompPlan.year} onChange={e => setNewCompPlan({ ...newCompPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 2 plan</button></form>
+              </div>
+              <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                <div><h3 className="font-extrabold">Part 1 plans ({plans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{plans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.topic} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : ""}</span><button type="button" onClick={() => { setTopic(p.topic); setPlanId(p.id); setTab("Audit Grid"); setPart("1"); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
+                <div><h3 className="font-extrabold">Part 2 plans ({compPlans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{compPlans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.category} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : ""} · {getBlocks(p).length} blocks</span><button type="button" onClick={() => { setCategory(p.category); setCompPlanId(p.id); setTab("Audit Grid"); setPart("2"); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
+              </div>
+            </section>}
+
+            {selectedCell && (
+              <div className="fixed inset-0 z-[9999] overflow-y-auto bg-black/50 pt-[max(1rem,var(--safe-area-inset-top))] pb-6">
+                <div className="min-h-full flex items-center justify-center px-3">
+                  <div className="w-full max-w-md rounded-2xl bg-[var(--surface)] p-5 shadow-2xl sheet-up">
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <h3 className="text-lg font-black">Enter audit score</h3>
+                        <p className="mt-1 text-sm font-bold [overflow-wrap:anywhere]">{labelFor(selectedCell.wilayat, selectedCell.institution)} • {selectedCell.period} • {selectedCell.part === "2" ? (selectedCell.category || category) : topic}</p>
+                        <p className="text-xs text-[var(--muted)]">{selectedCell.wilayat} Wilayat • {isSupabaseConfigured ? "Will sync to Supabase" : "Will sync to local backup"}</p>
+                      </div>
+                      <button type="button" onClick={() => setSelectedCell(null)} aria-label="Close score dialog" className="rounded-full border p-1" style={{ minHeight: 44, minWidth: 44, touchAction: 'manipulation', cursor: 'pointer' }}><X size={18} /></button>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      <label className="block text-sm font-bold">Score <span className="text-red-600">* Mandatory</span> (0-100 or NA)
+                        <input
+                          value={scoreInput}
+                          onChange={e => setScoreInput(e.target.value)}
+                          placeholder="e.g. 95 or NA"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          className={`mt-1 w-full ${!isScoreValid(scoreInput) && scoreInput !== "" ? "border-red-500" : ""}`}
+                          style={{ fontSize: 16, minHeight: 48 }}
+                        />
+                        <span className="mt-1 block text-[11px] text-[var(--muted)]">Mandatory — enter 0-100 or NA</span>
+                      </label>
+                      <label className="block text-sm font-bold">Your Name / Auditor Name <span className="text-red-600">* Mandatory</span>
+                        <input
+                          value={auditorNameInput}
+                          onChange={e => setAuditorNameInput(e.target.value)}
+                          placeholder="e.g. Salim Al Mamari"
+                          className={`mt-1 w-full ${!isNameValid(auditorNameInput) && auditorNameInput !== "" ? "border-red-500" : ""}`}
+                          style={{ fontSize: 16, minHeight: 48 }}
+                        />
+                        <span className="mt-1 block text-[11px] text-[var(--muted)]">Mandatory — will be shown as Audited by</span>
+                      </label>
+                      <label className="block text-sm font-bold">Comment <span className="text-[var(--muted)]">(Optional)</span>
+                        <textarea value={commentInput} onChange={e => setCommentInput(e.target.value)} rows={3} placeholder="Add a comment for this audit... (optional)" className="mt-1 w-full" style={{ fontSize: 16, minHeight: 80 }} />
+                      </label>
+                    </div>
+                    <div className="mt-2 rounded bg-white p-2 text-xs text-[var(--muted)]"><div className="font-bold text-[var(--ink)]">How it will appear:</div><div className="mt-1">Audited by: {auditorNameInput.trim() || "—"}</div><div>Added at: {formatMuscat(new Date().toISOString())}</div><div className="mt-1">Sync: shared database — only this row is upserted</div></div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={saveCell}
+                        disabled={busy || !isScoreValid(scoreInput) || !isNameValid(auditorNameInput)}
+                        className="rounded-lg bg-[var(--teal)] px-5 py-3 text-sm font-black text-white disabled:opacity-50"
+                        style={{ minHeight: 48, touchAction: 'manipulation', cursor: 'pointer' }}
+                      >
+                        <CheckCircle2 className="mr-1 inline" size={16} />{busy ? "Saving…" : "Save audit"}
+                      </button>
+                      <button type="button" onClick={() => setSelectedCell(null)} disabled={busy} className="rounded-lg border px-4 py-3 font-bold" style={{ minHeight: 48, touchAction: 'manipulation', cursor: 'pointer' }}>Cancel</button>
+                      <button type="button" onClick={deleteScore} disabled={busy} className="rounded-lg border border-red-300 px-3 py-3 font-bold text-red-700" style={{ minHeight: 48, touchAction: 'manipulation' }}><Trash2 className="mr-1 inline" size={16} />Remove</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-20 border-t border-[var(--line)] bg-[var(--surface)] px-2 py-2 pb-[max(.5rem,var(--safe-area-inset-top))]">
+              <div className="flex justify-around gap-1">
+                <button onClick={() => setTab("Dashboard")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Dashboard" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><BarChart3 size={18} /><span>Dashboard</span></button>
+                <button onClick={() => setTab("Audit Grid")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Audit Grid" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><ClipboardCheck size={18} /><span>Grid</span></button>
+                <button type="button" onClick={manualRefresh} disabled={refreshing} title="Tap to refresh scores from database" className="flex flex-col items-center rounded-full bg-[var(--teal)] px-4 py-2 text-[11px] font-black text-white shadow border-2 border-white disabled:opacity-60" style={{ minHeight: 44, touchAction: 'manipulation', cursor: 'pointer' }}><RefreshCw size={18} className={refreshing ? "animate-spin" : ""} /><span>⟳ Refresh</span></button>
+                <button onClick={() => setTab("Comments")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Comments" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><MessageSquare size={18} /><span>Comments</span></button>
+                {isAdmin && <button onClick={() => setTab("Plans")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Plans" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><Settings2 size={18} /><span>Plans</span></button>}
+              </div>
+              <div className="mt-1 text-center text-[10px] font-semibold text-[var(--muted)]">{liveStatus === "refreshing" ? "Refreshing..." : dbLabel}</div>
+            </nav>
+
+            <button type="button" onClick={manualRefresh} disabled={refreshing} title="Tap to refresh scores from database" aria-label="Refresh scores from database" className="sm:hidden fixed bottom-[84px] right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--teal)] text-white shadow-xl border-2 border-white disabled:opacity-60" style={{ minHeight: 56, touchAction: 'manipulation', cursor: 'pointer' }}>
+              <RefreshCw size={22} className={refreshing ? "animate-spin" : ""} />
+            </button>
+          </main>
+        </>
+      )}
+      {showHelp && <div className="fixed inset-0 z-[9999] overflow-y-auto bg-black/50 pt-[max(1rem,var(--safe-area-inset-top))] pb-6"><div className="min-h-full flex items-center justify-center px-3"><div className="w-full max-w-xl rounded-2xl bg-[var(--surface)] p-5 shadow-2xl"><div className="flex justify-between"><h2 className="text-lg font-black">How to use — Monthly plans, blocks &amp; Feedback + Supabase sync</h2><button onClick={() => setShowHelp(false)} aria-label="Close help"><X /></button></div><ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-relaxed"><li><strong>Header fixed:</strong> Green bar is now compact h-16 desktop (~64px), ~72px mobile stacked, not half page. Logo + title + role on same line desktop, compact stacked mobile.</li><li><strong>Secondary bars:</strong> Refresh + Live status in white bar, Part toggle + tabs in light gray bar, both below green header. Desktop shows tabs horizontal.</li><li><strong>Dashboard:</strong> grid grid-cols-1 lg:grid-cols-3 gap-4 — summary cards side-by-side on desktop.</li><li><strong>Audit Grid:</strong> Table scrolls horizontally on mobile (overflow-auto) but shows full on desktop. Main content starts right after header.</li><li><strong>Supabase sync:</strong> All saves upsert only the changed row to the shared audit_data table. Refresh re-fetches from the shared database and merges it — it never reloads the page and never logs you out.</li><li><strong>Mobile tap fix preserved:</strong> cell buttons with touch-action manipulation, fixed z-index 9999 dialog.</li></ol><button onClick={() => setShowHelp(false)} className="mt-4 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white">Got it</button></div></div></div>}
+    </div>
+  );
 }

@@ -410,10 +410,14 @@ export default function App() {
     // MERGE, never replace: a fetch that runs seconds after a save may not yet
     // include that just-saved row. Replacing would wipe it from the screen.
     // Merge keeps local scores not yet in Supabase, Supabase wins on conflict.
-    if (dedupedPlans.length) setPlans(prev => { const m = new Map(prev.map(x => [`${x.topic}||${x.year}`, x])); dedupedPlans.forEach(x => m.set(`${x.topic}||${x.year}`, x)); return [...m.values()]; });
-    if (dedupedScores.length) setScores(prev => { const m = new Map(prev.map(x => [`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x])); dedupedScores.forEach(x => m.set(`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x)); return [...m.values()]; });
-    if (dedupedCompPlans.length) setCompPlans(prev => { const m = new Map(prev.map(x => [`${x.category}||${x.year}`, x])); dedupedCompPlans.forEach(x => m.set(`${x.category}||${x.year}`, x)); return [...m.values()]; });
-    if (dedupedCompScores.length) setCompScores(prev => { const m = new Map(prev.map(x => [`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x])); dedupedCompScores.forEach(x => m.set(`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x)); return [...m.values()]; });
+    // PLAN-ID FIX: if Supabase returns the same Crash Cart plan with a different
+    // id, scores saved under the old id would become invisible (grid filters by
+    // planId). So merge scores by wilayat||institution||period||topic, ignoring
+    // planId, and keep the local plan id. Never let a plan copy hide a score.
+    if (dedupedScores.length) setScores(prev => { const m = new Map(prev.map(x => [`${x.wilayat}||${x.institution}||${x.period}||${x.topic || ''}`, x])); dedupedScores.forEach(x => { const k = `${x.wilayat}||${x.institution}||${x.period}||${x.topic || ''}`; const existing = m.get(k); m.set(k, existing ? { ...x, planId: existing.planId, id: existing.id } : x); }); return [...m.values()]; });
+    if (dedupedPlans.length) setPlans(prev => { const m = new Map(prev.map(x => [`${x.topic}||${x.year}`, x])); dedupedPlans.forEach(x => { const k = `${x.topic}||${x.year}`; const existing = m.get(k); m.set(k, existing ? { ...x, id: existing.id } : x); }); return [...m.values()]; });
+    if (dedupedCompPlans.length) setCompPlans(prev => { const m = new Map(prev.map(x => [`${x.category}||${x.year}`, x])); dedupedCompPlans.forEach(x => { const k = `${x.category}||${x.year}`; const existing = m.get(k); m.set(k, existing ? { ...x, id: existing.id } : x); }); return [...m.values()]; });
+    if (dedupedCompScores.length) setCompScores(prev => { const m = new Map(prev.map(x => [`${x.wilayat}||${x.institution}||${x.period}||${x.category || ''}`, x])); dedupedCompScores.forEach(x => { const k = `${x.wilayat}||${x.institution}||${x.period}||${x.category || ''}`; const existing = m.get(k); m.set(k, existing ? { ...x, planId: existing.planId, id: existing.id } : x); }); return [...m.values()]; });
     if (newInst.length) setInstOverrides(newInst);
     if (newProc.length) setProcOverrides(newProc);
     if (newPwd.length) setOverrides(newPwd);

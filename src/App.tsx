@@ -82,11 +82,11 @@ function formatLiveTime(iso?: string): string {
 }
 function labelFor(w: string, inst: string) { return cleanInstitutionName(inst, w); }
 function scoreColor(s: string) {
-  if (s === "NA") return { background: "var(--amber)" };
+  if (s === "NA") return { background: "var(--amber)", color: "#111111" };
   const n = parseFloat(s); if (isNaN(n)) return {};
-  if (n >= 95) return { background: "var(--green)" };
-  if (n >= 85) return { background: "#eef6c9" };
-  return { background: "var(--red)" };
+  if (n >= 95) return { background: "var(--green)", color: "#ffffff" };
+  if (n >= 85) return { background: "#eef6c9", color: "#111111" };
+  return { background: "var(--red)", color: "#ffffff" };
 }
 function procTag(p: string) { if (p.startsWith("[LR]")) return "LR"; if (p.startsWith("[RMC]")) return "RMC"; return "General"; }
 function stripProcedurePrefix(name: string) { return name.replace(/^\[(LR|RMC)\]\s*/i, "").trim(); }
@@ -95,17 +95,21 @@ function xmlEscape(s: string) { return String(s ?? "").replace(/&/g, "&amp;").re
 function colLetter(idx: number) { let n = idx; let s = ""; while (n >= 0) { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } return s; }
 function isNumericCell(v: string) { if (v === "" || v === null || v === undefined) return false; const t = String(v).trim().toUpperCase(); if (t === "NA" || t === "") return false; const num = Number(t); return !isNaN(num) && isFinite(num); }
 function sheetRowsToXml(rows: string[][]): string {
+  const maxCols = Math.max(1, ...rows.map(r => r.length));
+  const widths: number[] = [];
+  for (let ci = 0; ci < maxCols; ci++) { let mx = 10; rows.forEach(r => { const v = String(r[ci] ?? ""); mx = Math.max(mx, Math.min(42, v.length + 2)); }); widths.push(mx); }
+  const colsXml = `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w.toFixed(1)}" customWidth="1"/>`).join("")}</cols>`;
   const rowsXml = rows.map((row, ri) => {
-    const rNum = ri + 1;
+    const rNum = ri + 1; const isHeader = ri <= 1;
     const cells = row.map((val, ci) => {
       const col = colLetter(ci); const ref = `${col}${rNum}`;
       if (val === null || val === undefined) val = "";
-      const str = String(val);
-      if (isNumericCell(str)) { return `<c r="${ref}"><v>${xmlEscape(str)}</v></c>`; } else { return `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(str)}</t></is></c>`; }
+      const str = String(val); const s = isHeader ? ` s="1"` : ` s="0"`;
+      if (isNumericCell(str)) { return `<c r="${ref}"${s}><v>${xmlEscape(str)}</v></c>`; } else { return `<c r="${ref}" t="inlineStr"${s}><is><t>${xmlEscape(str)}</t></is></c>`; }
     }).join("");
-    return `<row r="${rNum}">${cells}</row>`;
+    return `<row r="${rNum}"${isHeader ? ' ht="20"' : ""}>${cells}</row>`;
   }).join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rowsXml}</sheetData></worksheet>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${colsXml}<sheetData>${rowsXml}</sheetData><autoFilter ref="A1:${colLetter(maxCols - 1)}${rows.length}"/></worksheet>`;
 }
 function makeCRCTable() { const table: number[] = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) { c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); } table[n] = c; } return table; }
 const CRC_TABLE = makeCRCTable();
@@ -143,7 +147,7 @@ function downloadXLSX(filename: string, sheets: { name: string, rows: string[][]
   const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
   const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${safeSheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${safeSheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
   const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${safeSheets.map((sh, i) => `<sheet name="${xmlEscape(sh.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`;
-  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor rgb="FF0F766E"/></patternFill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color auto="1"/></left><right style="thin"><color auto="1"/></right><top style="thin"><color auto="1"/></top><bottom style="thin"><color auto="1"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" alignment="1" horizontal="center" vertical="center"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
   const files: ZipFile[] = [
     { name: "[Content_Types].xml", data: strToBytes(contentTypes) },
     { name: "_rels/.rels", data: strToBytes(rels) },
@@ -611,14 +615,14 @@ export default function App() {
     if (!selectedCell || !user) return;
     const val = scoreInput.trim().toUpperCase();
     const nameVal = auditorNameInput.trim();
-    if (!isScoreValid(scoreInput)) { setSaveMsg("Score is mandatory: enter 0–100 or NA."); return; }
-    if (!isNameValid(auditorNameInput)) { setSaveMsg("Auditor Name is mandatory: enter at least 2 characters."); return; }
+    if (!isScoreValid(scoreInput)) { setLiveToast("Score is mandatory: enter 0–100 or NA."); return; }
+    if (!isNameValid(auditorNameInput)) { setLiveToast("Auditor Name is mandatory: enter at least 2 characters."); return; }
     setBusy(true); setSaveMsg(""); lastSaveAtRef.current = Date.now();
     const nowIso = new Date().toISOString();
     if (selectedCell.part === "2") {
       if (!activeCompPlan) { setBusy(false); return; }
       const idx = activeCompPlan.periods.indexOf(selectedCell.period);
-      if (idx >= 0 && activeCompPlan.feedback?.[idx]) { setSaveMsg("This month is Obtaining Feedback — it cannot receive a score."); setBusy(false); return; }
+      if (idx >= 0 && activeCompPlan.feedback?.[idx]) { setLiveToast("This month is Obtaining Feedback — it cannot receive a score."); setBusy(false); return; }
       const proc = (idx >= 0 ? activeCompPlan.procedures?.[idx] : null) || "";
       const existing = findCompScore(selectedCell.wilayat, selectedCell.institution, selectedCell.period);
       const value = { planId: activeCompPlan.id, wilayat: selectedCell.wilayat, institution: cleanInstitutionName(selectedCell.institution, selectedCell.wilayat), category: selectedCell.category || category, year: activeCompPlan.year, period: selectedCell.period, procedure: proc, score: val, comment: commentInput.trim(), auditorName: nameVal, auditedAt: nowIso, history: existing?.history || [] };
@@ -629,7 +633,7 @@ export default function App() {
       await syncSaveFirst(supId, { id: newId, ...value });
       try { if (existing) await api("records.replace", { collection: "competency_scores", id: existing.id, value }); else await api("records.create", { collection: "competency_scores", value, idempotency_key: `compscore-${activeCompPlan.id}-${selectedCell.wilayat}-${selectedCell.institution}-${selectedCell.period}-${Date.now()}` }); } catch {}
       saveLocalBackup({ plans, scores, compPlans, compScores: [...compScores.filter(s => !(s.wilayat === selectedCell.wilayat && s.institution === selectedCell.institution && s.period === selectedCell.period && s.planId === activeCompPlan.id)), newRec], instOverrides, procOverrides, overrides, auditorProfiles, security });
-      setSaveMsg("Saved. Syncing to shared database..."); setSelectedCell(null); setBusy(false);
+      setSaveMsg(""); setSelectedCell(null); setBusy(false);
       setLastUpdatedAt(nowIso); setLiveStatus("live");
       return;
     }
@@ -643,7 +647,7 @@ export default function App() {
     await syncSaveFirst(supId, { id: newId, ...value });
     try { if (existing) await api("records.replace", { collection: "audit_scores", id: existing.id, value }); else await api("records.create", { collection: "audit_scores", value, idempotency_key: `score-${activePlan.id}-${selectedCell.wilayat}-${selectedCell.institution}-${selectedCell.period}-${Date.now()}` }); } catch {}
     saveLocalBackup({ plans, scores: [...scores.filter(s => !(s.wilayat === selectedCell.wilayat && s.institution === selectedCell.institution && s.period === selectedCell.period && s.planId === activePlan.id)), newRec], compPlans, compScores, instOverrides, procOverrides, overrides, auditorProfiles, security });
-    setSaveMsg("Saved. Syncing to shared database..."); setSelectedCell(null); setBusy(false); setLastUpdatedAt(nowIso); setLiveStatus("live");
+    setSaveMsg(""); setSelectedCell(null); setBusy(false); setLastUpdatedAt(nowIso); setLiveStatus("live");
   }
 
   async function deleteScore() {
@@ -660,11 +664,16 @@ export default function App() {
       await supabaseDelete(`audit_scores_${ex.id}`);
       try { await api("records.delete", { collection: "audit_scores", id: ex.id }); } catch {}
     }
-    setSelectedCell(null); setSaveMsg("Entry removed."); setBusy(false);
+    setSelectedCell(null); setLiveToast("Entry removed."); setBusy(false);
   }
 
   function openCell(v: { wilayat: string; institution: string }, period: string, partOverride?: string, catOverride?: string) {
     if (!user) return;
+    // 9 - Deactivated plan: Wilayat can view but cannot edit. Admin/Master can still edit.
+    if (user.role === "Wilayat") {
+      if (partOverride === "2" && activeCompPlan && !activeCompPlan.active) { setLiveToast("This Competency plan is deactivated — view only. Ask Admin to activate it to edit."); return; }
+      if (partOverride !== "2" && activePlan && !activePlan.active) { setLiveToast("This Part 1 plan is deactivated — view only. Ask Admin to activate it to edit."); return; }
+    }
     if (partOverride === "2") {
       const ex = findCompScore(v.wilayat, v.institution, period);
       setSelectedCell({ wilayat: v.wilayat, institution: v.institution, period, part: "2", category: catOverride || category });
@@ -792,6 +801,27 @@ export default function App() {
     downloadXLSX(`Part2_Stats_${activeCompPlan?.year || "All"}_${category}_${Date.now()}.xlsx`, [{ name: "Detailed Scores", rows: detailedRows }, { name: "Summary by Category", rows: summaryRows }]);
   }
 
+  // 9 - Master/Admin can activate / deactivate plans. Deactivated = Wilayat sees scores but cannot edit.
+  async function togglePart1PlanActive(plan: Plan) {
+    const next = !plan.active;
+    setPlans(prev => prev.map(x => x.id === plan.id ? { ...x, active: next } : x));
+    try { await syncSaveFirst(`audit_plans_${plan.id}`, { id: plan.id, topic: plan.topic, year: plan.year, frequency: plan.frequency, periods: plan.periods, active: next }); } catch {}
+    setLiveToast(next ? `${plan.topic} · ${plan.year} activated.` : `${plan.topic} · ${plan.year} deactivated — Wilayat view only.`);
+  }
+  async function toggleCompPlanActive(plan: CompPlan) {
+    const next = !plan.active;
+    setCompPlans(prev => prev.map(x => x.id === plan.id ? { ...x, active: next } : x));
+    try { await syncSaveFirst(`competency_plans_${plan.id}`, { id: plan.id, category: plan.category, year: plan.year, frequency: plan.frequency, periods: plan.periods, procedures: plan.procedures, feedback: plan.feedback, active: next }); } catch {}
+    setLiveToast(next ? `${plan.category} · ${plan.year} activated.` : `${plan.category} · ${plan.year} deactivated — Wilayat view only.`);
+  }
+  // 5 - Export Competency plan to Word (.doc) with MOH logo header
+  function exportCompPlanWord() {
+    if (!activeCompPlan) return;
+    const rows = activeCompPlan.periods.map((m, i) => `<tr><td>${m}</td><td>${xmlEscape(displayProcedure(activeCompPlan.procedures?.[i]) || "—")}</td><td>${activeCompPlan.feedback?.[i] ? "Feedback" : ""}</td></tr>`).join("");
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Competency Plan — ${xmlEscape(activeCompPlan.category)} ${activeCompPlan.year}</title><style>body{font-family:Calibri,Arial,sans-serif} table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:8px} th{background:#0F766E;color:#fff} h1{color:#0F766E}</style></head><body><table style="border:none;width:100%"><tr><td style="border:none"><img src="${mohLogo}" width="120" alt="MOH logo"></td><td style="border:none;text-align:right"><strong>Ministry of Health — Oman</strong><br>Directorate of Health Services<br>North Al Batinah</td></tr></table><h1>Competency Plan — ${xmlEscape(activeCompPlan.category)} · ${activeCompPlan.year}</h1><p>Category: ${xmlEscape(activeCompPlan.category)} &nbsp;|&nbsp; Year: ${activeCompPlan.year} &nbsp;|&nbsp; Status: ${activeCompPlan.active ? "Active" : "Deactivated — view only"}</p><table><tr><th>Month</th><th>Procedure</th><th>Feedback</th></tr>${rows}</table><p>Blocks: ${getBlocks(activeCompPlan).length} &nbsp;|&nbsp; Generated from North Al Batinah — Nursing Audit System</p></body></html>`;
+    const blob = new Blob(["\ufeff" + html], { type: "application/msword" });
+    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `Competency_Plan_${activeCompPlan.category}_${activeCompPlan.year}.doc`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   async function createPlan(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
     try {
@@ -801,7 +831,7 @@ export default function App() {
       setPlans(prev => [...prev.filter(p => !(p.topic === value.topic && p.year === value.year)), newP]);
       await syncSaveFirst(`audit_plans_${newId}`, { id: newId, ...value });
       try { await api("records.create", { collection: "audit_plans", value, idempotency_key: `plan-${newPlan.topic}-${newPlan.year}-${Date.now()}` }); } catch {}
-      setSaveMsg("Plan created and set as active."); setTopic(newPlan.topic);
+      setLiveToast("Plan created and set as active."); setTopic(newPlan.topic);
     } catch (err: any) { setSaveMsg(`Could not create plan: ${err.message}`); }
     setBusy(false);
   }
@@ -814,7 +844,7 @@ export default function App() {
       setCompPlans(prev => [...prev.filter(p => !(p.category === value.category && p.year === value.year)), newP]);
       await syncSaveFirst(`competency_plans_${newId}`, { id: newId, ...value });
       try { await api("records.create", { collection: "competency_plans", value, idempotency_key: `compplan-${newCompPlan.category}-${newCompPlan.year}-${Date.now()}` }); } catch {}
-      setSaveMsg("Part 2 plan created."); setCategory(newCompPlan.category);
+      setLiveToast("Part 2 plan created."); setCategory(newCompPlan.category);
     } catch (err: any) { setSaveMsg(`Could not create Part 2 plan: ${err.message}`); }
     setBusy(false);
   }
@@ -874,7 +904,7 @@ export default function App() {
 
   // ---------- FIXED HEADER LAYOUT ----------
   const CompactHeader = (
-    <header data-safe-area-sticky-top style={{ top: "var(--safe-area-inset-top)" }} className="noprint sticky z-30 border-b border-white/10 bg-[var(--teal)] text-white">
+    <header data-safe-area-sticky-top style={{ top: "var(--safe-area-inset-top)" }} className="noprint sticky z-10 border-b border-white/10 bg-[var(--teal)] text-white">
       <div className="mx-auto flex max-w-[1500px] items-center gap-3 px-4 py-3">
         <img src={mohLogo} alt="MOH Logo" className="h-10 w-auto shrink-0 rounded-lg bg-white p-1 object-contain" />
         <div className="min-w-0 flex-1">
@@ -980,12 +1010,12 @@ export default function App() {
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     {effectiveUsers.map(u => <button key={u.username} onClick={() => { setUsername(u.username); setPassword(u.password); }} className="rounded-lg border border-[var(--line)] px-2 py-2 text-left text-sm hover:bg-[var(--surface2)]">
                       <span className="block font-bold capitalize">{u.label} {u.role === "Wilayat" ? "— Wilayat" : ""}</span>
-                      <span className="text-xs text-[var(--muted)]">{u.username} · {u.password}</span>
+                      <span className="text-xs text-[var(--muted)]">{u.username} · ••••••••</span>
                     </button>)}
                   </div>
                 </div>
-                <p className="mt-4 text-xs leading-relaxed text-[var(--muted)]">Demo accounts are for this preview. Wilayat users only see their own Wilayat. Admin sees all Wilayats and can manage plans and Wilayat passwords. Master sees all and controls access. {isSupabaseConfigured ? "Supabase sync enabled — saves appear on other PCs." : "Supabase not configured — using the shared records API."}</p>
-                <p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">Use the in-app Refresh button to get the latest data — it re-fetches only, never reloads the page, and never logs you out. Your sign-in (username + session version only, never password) is saved to the shared backend, so a browser refresh restores your session on Dashboard.</p>
+
+
               </div>
             </div>
           </div>
@@ -996,9 +1026,9 @@ export default function App() {
           {SecondaryBar}
           {PartTabsBar}
 
-          <main className="mx-auto max-w-[1500px] px-3 py-4 pb-36 sm:px-5 sm:py-6 sm:pb-6">
+          <main className="mx-auto max-w-[1500px] px-3 py-4 pb-6 sm:px-5 sm:py-6 sm:pb-6">
             {liveToast && <div role="status" className="mb-4 flex items-start justify-between gap-2 rounded-xl border border-[var(--teal)] bg-[var(--surface)] p-3 text-sm font-bold shadow"><span>{liveToast}</span><button type="button" onClick={() => setLiveToast(null)} aria-label="Dismiss notification" className="shrink-0 rounded-full border px-2 py-0.5 text-xs">Dismiss</button></div>}
-            {saveMsg && <div className="mb-4 rounded-xl bg-[var(--surface2)] p-3 text-sm font-semibold">{saveMsg}</div>}
+
             {backendError && <div className="mb-4 rounded-xl bg-[var(--red)] p-3 text-sm font-bold">{backendError}</div>}
 
             {tab === "Control Panel" && isAdmin && (
@@ -1040,7 +1070,6 @@ export default function App() {
                 <div className="mt-4 flex flex-wrap gap-3">
                   {isAdmin ? <>
                     <button onClick={exportPart1StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--teal)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export Part 1 Statistics Excel</button>
-                    <button onClick={exportPart2StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--blue)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export Part 2 Statistics Excel</button>
                   </> : <button onClick={exportPart1StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--teal)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export My Statistics Excel</button>}
                   <span className="self-center text-xs text-[var(--muted)]">{dbLabel} • Asia/Muscat • real .xlsx</span>
                 </div>
@@ -1053,7 +1082,7 @@ export default function App() {
               {tab === "Audit Grid" && <section className="card p-3 sm:p-4">
                 <div className="mb-3 flex flex-wrap gap-4 text-sm"><span><strong>{topic}</strong> · {activePlan ? `${activePlan.year} · Monthly · 12 months` : "No plan"}</span><span>Completion <strong>{gridStats.completion.toFixed(1)}%</strong></span><span>Audits <strong>{gridStats.count}</strong></span><span>Average <strong>{gridStats.avg ? gridStats.avg.toFixed(2) + "%" : "—"}</strong></span><span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-800">{dbLabel}</span></div>
                 {!activePlan ? <p className="text-sm text-[var(--muted)]">Select or create a plan to see the grid.</p> : <>
-                  <p className="mb-2 rounded-lg bg-[var(--amber)] px-3 py-2 text-sm font-semibold">Tap a cell to enter score — row stays highlighted until you Save. Score and Auditor Name are mandatory. Use top Refresh to get latest from Supabase shared database.</p>
+
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <label className="w-full text-sm font-bold sm:w-auto">Jump to institution<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search institution…" className="mt-1 w-full sm:w-[220px]" /></label>
                     <button type="button" onClick={() => setSingleMonthView(!singleMonthView)} aria-pressed={singleMonthView} className={`rounded-full px-4 py-2 text-sm font-bold ${singleMonthView ? "bg-[var(--teal)] text-white" : "border bg-white"}`}>{singleMonthView ? "Single month view: ON" : "Single month view: OFF"}</button>
@@ -1113,6 +1142,7 @@ export default function App() {
               {tab === "Dashboard" && <div>
                 <div className="mt-4 flex flex-wrap gap-3">
                   <button onClick={exportPart2StatsExcel} className="flex items-center gap-2 rounded-xl bg-[var(--blue)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export Part 2 Statistics Excel</button>
+                  <button onClick={exportCompPlanWord} className="flex items-center gap-2 rounded-xl bg-[var(--teal)] px-6 py-3 text-sm font-black text-white shadow-md"><Download size={18} />Export Competency Plan to Word</button>
                   <span className="self-center text-xs text-[var(--muted)]">{dbLabel} • real .xlsx</span>
                 </div>
                 <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -1124,7 +1154,7 @@ export default function App() {
               {tab === "Audit Grid" && <section className="card p-3 sm:p-4">
                 <div className="mb-3 flex flex-wrap gap-4 text-sm"><span><strong>{category}</strong> · {activeCompPlan ? `${activeCompPlan.year} · Monthly · ${getBlocks(activeCompPlan).length} blocks` : "No plan"}</span><span>Completion <strong>{compGridStats.completion.toFixed(1)}%</strong></span><span>Audits <strong>{compGridStats.count}</strong></span><span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-800">{dbLabel}</span></div>
                 {!activeCompPlan ? <p className="text-sm text-[var(--muted)]">Select or create a plan to see the grid.</p> : <>
-                  <p className="mb-2 rounded-lg bg-[var(--amber)] px-3 py-2 text-sm font-semibold">Tap a cell to enter score — block system: same procedure in consecutive months = one block. One score per block. Use top Refresh to get latest from Supabase.</p>
+
                   <div ref={gridRef} className="gridwrap">
                     <table className="excel">
                       <thead><tr><th>Institution / Procedure block</th>{activeCompPlan.periods.map((p, i) => <th key={i}>{p}<span className="block text-[10px] font-normal">{activeCompPlan.feedback?.[i] ? "Feedback" : displayProcedure(activeCompPlan.procedures?.[i])}</span></th>)}</tr></thead>
@@ -1172,13 +1202,13 @@ export default function App() {
                 <form onSubmit={createCompPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 2 plan</h3><label className="mt-3 block text-sm font-bold">Category<select value={newCompPlan.category} onChange={e => setNewCompPlan({ ...newCompPlan, category: e.target.value })} className="mt-1 w-full">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newCompPlan.year} onChange={e => setNewCompPlan({ ...newCompPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 2 plan</button></form>
               </div>
               <div className="mt-6 grid gap-4 lg:grid-cols-2">
-                <div><h3 className="font-extrabold">Part 1 plans ({plans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{plans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.topic} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : ""}</span><button type="button" onClick={() => { setTopic(p.topic); setPlanId(p.id); setTab("Audit Grid"); setPart("1"); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
-                <div><h3 className="font-extrabold">Part 2 plans ({compPlans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{compPlans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.category} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : ""} · {getBlocks(p).length} blocks</span><button type="button" onClick={() => { setCategory(p.category); setCompPlanId(p.id); setTab("Audit Grid"); setPart("2"); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
+                <div><h3 className="font-extrabold">Part 1 plans ({plans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{plans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.topic} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : "Deactivated"}</span><button type="button" onClick={() => togglePart1PlanActive(p)} className="rounded-full border px-2 py-1 text-xs font-bold">{p.active ? "Deactivate" : "Activate"}</button><button type="button" onClick={() => { setTopic(p.topic); setPlanId(p.id); setTab("Audit Grid"); setPart("1"); }} className="rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
+                <div><h3 className="font-extrabold">Part 2 plans ({compPlans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{compPlans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.category} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : "Deactivated"} · {getBlocks(p).length} blocks</span><button type="button" onClick={() => toggleCompPlanActive(p)} className="rounded-full border px-2 py-1 text-xs font-bold">{p.active ? "Deactivate" : "Activate"}</button><button type="button" onClick={() => { setCategory(p.category); setCompPlanId(p.id); setTab("Audit Grid"); setPart("2"); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
               </div>
             </section>}
 
             {selectedCell && (
-              <div className="fixed inset-0 z-[9999] overflow-y-auto bg-black/50 pt-[max(1rem,var(--safe-area-inset-top))] pb-6">
+              <div className="fixed inset-0 overflow-y-auto bg-black/50 pt-[max(1rem,var(--safe-area-inset-top))] pb-6" style={{ zIndex: 10000 }}>
                 <div className="min-h-full flex items-center justify-center px-3">
                   <div className="w-full max-w-md rounded-2xl bg-[var(--surface)] p-5 shadow-2xl sheet-up">
                     <div className="flex justify-between items-start gap-2">
@@ -1192,6 +1222,10 @@ export default function App() {
                     <div className="mt-4 space-y-3">
                       <label className="block text-sm font-bold">Score <span className="text-red-600">* Mandatory</span> (0-100 or NA)
                         <input
+                          type="text"
+                          inputMode="text"
+                          autoCapitalize="characters"
+                          autoCorrect="off"
                           value={scoreInput}
                           onChange={e => setScoreInput(e.target.value)}
                           placeholder="e.g. 95 or NA"
@@ -1235,20 +1269,7 @@ export default function App() {
               </div>
             )}
 
-            <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-20 border-t border-[var(--line)] bg-[var(--surface)] px-2 py-2 pb-[max(.5rem,var(--safe-area-inset-top))]">
-              <div className="flex justify-around gap-1">
-                <button onClick={() => setTab("Dashboard")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Dashboard" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><BarChart3 size={18} /><span>Dashboard</span></button>
-                <button onClick={() => setTab("Audit Grid")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Audit Grid" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><ClipboardCheck size={18} /><span>Grid</span></button>
-                <button type="button" onClick={manualRefresh} disabled={refreshing} title="Tap to refresh scores from database" className="flex flex-col items-center rounded-full bg-[var(--teal)] px-4 py-2 text-[11px] font-black text-white shadow border-2 border-white disabled:opacity-60" style={{ minHeight: 44, touchAction: 'manipulation', cursor: 'pointer' }}><RefreshCw size={18} className={refreshing ? "animate-spin" : ""} /><span>⟳ Refresh</span></button>
-                <button onClick={() => setTab("Comments")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Comments" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><MessageSquare size={18} /><span>Comments</span></button>
-                {isAdmin && <button onClick={() => setTab("Plans")} className={`flex flex-col items-center rounded-lg px-2 py-1 text-[11px] font-bold ${tab === "Plans" ? "text-[var(--teal)] bg-[var(--surface2)]" : "text-[var(--muted)]"}`}><Settings2 size={18} /><span>Plans</span></button>}
-              </div>
-              <div className="mt-1 text-center text-[10px] font-semibold text-[var(--muted)]">{liveStatus === "refreshing" ? "Refreshing..." : dbLabel}</div>
-            </nav>
-
-            <button type="button" onClick={manualRefresh} disabled={refreshing} title="Tap to refresh scores from database" aria-label="Refresh scores from database" className="sm:hidden fixed bottom-[84px] right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--teal)] text-white shadow-xl border-2 border-white disabled:opacity-60" style={{ minHeight: 56, touchAction: 'manipulation', cursor: 'pointer' }}>
-              <RefreshCw size={22} className={refreshing ? "animate-spin" : ""} />
-            </button>
+            
           </main>
         </>
       )}

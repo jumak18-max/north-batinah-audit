@@ -407,10 +407,13 @@ export default function App() {
     const dedupedScores = dedupBy(newScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
     const dedupedCompPlans = dedupBy(newCompPlans, (p) => `${p.category}||${p.year}`);
     const dedupedCompScores = dedupBy(newCompScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
-    if (dedupedPlans.length) setPlans(dedupedPlans);
-    if (dedupedScores.length) setScores(dedupedScores);
-    if (dedupedCompPlans.length) setCompPlans(dedupedCompPlans);
-    if (dedupedCompScores.length) setCompScores(dedupedCompScores);
+    // MERGE, never replace: a fetch that runs 3s after a save may not yet
+    // include that just-saved row. Replacing would delete it from the screen.
+    // Merge keeps local scores not yet in Supabase, Supabase wins on conflict.
+    if (dedupedPlans.length) setPlans(prev => { const m = new Map(prev.map(x => [`${x.topic}||${x.year}`, x])); dedupedPlans.forEach(x => m.set(`${x.topic}||${x.year}`, x)); return [...m.values()]; });
+    if (dedupedScores.length) setScores(prev => { const m = new Map(prev.map(x => [`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x])); dedupedScores.forEach(x => m.set(`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x)); return [...m.values()]; });
+    if (dedupedCompPlans.length) setCompPlans(prev => { const m = new Map(prev.map(x => [`${x.category}||${x.year}`, x])); dedupedCompPlans.forEach(x => m.set(`${x.category}||${x.year}`, x)); return [...m.values()]; });
+    if (dedupedCompScores.length) setCompScores(prev => { const m = new Map(prev.map(x => [`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x])); dedupedCompScores.forEach(x => m.set(`${x.planId}||${x.wilayat}||${x.institution}||${x.period}`, x)); return [...m.values()]; });
     if (newInst.length) setInstOverrides(newInst);
     if (newProc.length) setProcOverrides(newProc);
     if (newPwd.length) setOverrides(newPwd);

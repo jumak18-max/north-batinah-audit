@@ -82,11 +82,12 @@ function formatLiveTime(iso?: string): string {
 }
 function labelFor(w: string, inst: string) { return cleanInstitutionName(inst, w); }
 function scoreColor(s: string) {
-  if (s === "NA") return { background: "var(--amber)", color: "#111111" };
+  // Explicit hex + dark text on every range. Never white-on-pale-green (unreadable, see screenshot).
+  if (s === "NA") return { background: "#FDE68A", color: "#111111", fontWeight: 700 };
   const n = parseFloat(s); if (isNaN(n)) return {};
-  if (n >= 95) return { background: "var(--green)", color: "#ffffff" };
-  if (n >= 85) return { background: "#eef6c9", color: "#111111" };
-  return { background: "var(--red)", color: "#ffffff" };
+  if (n >= 95) return { background: "#C9EAD9", color: "#0B3D2E", fontWeight: 700 };
+  if (n >= 85) return { background: "#EEF6C9", color: "#111111", fontWeight: 700 };
+  return { background: "#FECACA", color: "#7F1D1D", fontWeight: 700 };
 }
 function procTag(p: string) { if (p.startsWith("[LR]")) return "LR"; if (p.startsWith("[RMC]")) return "RMC"; return "General"; }
 function stripProcedurePrefix(name: string) { return name.replace(/^\[(LR|RMC)\]\s*/i, "").trim(); }
@@ -814,64 +815,13 @@ export default function App() {
     try { await syncSaveFirst(`competency_plans_${plan.id}`, { id: plan.id, category: plan.category, year: plan.year, frequency: plan.frequency, periods: plan.periods, procedures: plan.procedures, feedback: plan.feedback, active: next }); } catch {}
     setLiveToast(next ? `${plan.category} · ${plan.year} activated.` : `${plan.category} · ${plan.year} deactivated — Wilayat view only.`);
   }
-  // 5 - Export Competency plan to Word (.doc) — SAME style/text as previous chat version.
-  // Logo must be EMBEDDED as base64 (Word cannot open a /assets/... path), so we fetch the
-  // imported logo file and convert it to a data URL before building the file.
-  async function exportCompPlanWord() {
+  // 5 - Export Competency plan to Word (.doc) with MOH logo header
+  function exportCompPlanWord() {
     if (!activeCompPlan) return;
-    const shortCat = activeCompPlan.category.includes("Renal") ? "RMC" : activeCompPlan.category.includes("Labour") ? "Labour Rooms" : activeCompPlan.category;
-    const title = `${shortCat} Competency Procedures plan ${activeCompPlan.year}`;
-    // --- Logo as base64 (fixes "logo can't display") ---
-    let logoDataUrl = "";
-    try {
-      const res = await fetch(mohLogo);
-      const blob = await res.blob();
-      logoDataUrl = await new Promise<string>((resolve) => { const r = new FileReader(); r.onload = () => resolve(String(r.result || "")); r.onerror = () => resolve(""); r.readAsDataURL(blob); });
-    } catch { logoDataUrl = ""; }
-    const logoImg = logoDataUrl ? `<img src="${logoDataUrl}" alt="Ministry of Health logo" style="height:72px;width:auto;" />` : "";
-    // --- Build rows: one row per unique procedure/block, highlight months according to plan ---
-    // Walk months in order, group consecutive months with the same procedure into one block.
-    type PlanRow = { name: string; months: Set<number>; feedback: boolean };
-    const rows: PlanRow[] = [];
-    const blocks = getBlocks(activeCompPlan);
-    // Use blocks (same logic as grid) so a procedure repeated for 3 months = 1 row with 3 highlighted months.
-    blocks.forEach((b) => {
-      const proc = displayProcedure(activeCompPlan.procedures?.[b.start]) || "";
-      const months = new Set<number>(); for (let i = b.start; i <= b.end; i++) months.add(i);
-      rows.push({ name: proc, months, feedback: false, _start: b.start } as any);
-    });
-    // Feedback months are skipped by getBlocks, so group consecutive feedback months into their own row(s)
-    // in the same order as the plan (e.g. Nov-Dec = one "Obtaining Feedback" row, purple).
-    {
-      let i = 0;
-      while (i < 12) {
-        if (!activeCompPlan.feedback?.[i]) { i++; continue; }
-        let j = i; while (j + 1 < 12 && activeCompPlan.feedback?.[j + 1]) j++;
-        const months = new Set<number>(); for (let k = i; k <= j; k++) months.add(k);
-        rows.push({ name: "Obtaining Feedback", months, feedback: true, _start: i } as any);
-        i = j + 1;
-      }
-      rows.sort((a: any, b: any) => a._start - b._start);
-    }
-    // Fallback: if no blocks (empty plan), show one row per month
-    if (rows.length === 0) {
-      activeCompPlan.periods.forEach((_, i) => {
-        const isFb = !!activeCompPlan.feedback?.[i];
-        rows.push({ name: isFb ? "Obtaining Feedback" : (displayProcedure(activeCompPlan.procedures?.[i]) || "—"), months: new Set([i]), feedback: isFb });
-      });
-    }
-    const monthHeaders = MONTHS.map(m => `<th style="width:6.5%;">${m}</th>`).join("");
-    const bodyRows = rows.map((r, idx) => {
-      const cells = MONTHS.map((_, mi) => {
-        if (r.feedback && r.months.has(mi)) return `<td style="background:#ede9fe;color:#4c1d95;font-size:8pt;font-weight:bold;text-align:center;">Obtaining Feedback</td>`;
-        if (r.months.has(mi)) return `<td style="background:#c9ead9;">&nbsp;</td>`;
-        return `<td>&nbsp;</td>`;
-      }).join("");
-      return `<tr><td style="text-align:center;">${idx + 1}</td><td style="text-align:left;">${xmlEscape(r.name)}</td>${cells}</tr>`;
-    }).join("");
-    const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${xmlEscape(title)}</title><style>@page WordSection1{size:29.7cm 21cm;mso-page-orientation:landscape;margin:1cm 1cm 1cm 1cm;} div.WordSection1{page:WordSection1;} body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#102a2c;} p{margin:4pt 0;} table{border-collapse:collapse;width:100%;font-size:9pt;} th,td{border:1pt solid #7a8a88;padding:4pt 5pt;text-align:center;vertical-align:middle;} th{background:#0d6e6b;color:#ffffff;font-weight:bold;} thead{display:table-header-group;} tr{page-break-inside:avoid;}</style></head><body><div class="WordSection1"><div style="text-align:center;"><p style="text-align:center;margin:0 0 6pt;">${logoImg}</p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">North Batinah Governorate</p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Nursing Service Department</p><p style="font-size:15pt;font-weight:bold;margin:4pt 0 10pt;">${xmlEscape(title)}</p></div><table><thead><tr><th style="width:5%;">Serial Number</th><th style="width:22%;text-align:left;">Planned Procedures</th>${monthHeaders}</tr></thead><tbody>${bodyRows}</tbody></table></div></body></html>`;
-    const outBlob = new Blob(["\ufeff" + html], { type: "application/msword" });
-    const url = URL.createObjectURL(outBlob); const a = document.createElement("a"); a.href = url; a.download = `${title.replace(/\s+/g, "_")}.doc`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const rows = activeCompPlan.periods.map((m, i) => `<tr><td>${m}</td><td>${xmlEscape(displayProcedure(activeCompPlan.procedures?.[i]) || "—")}</td><td>${activeCompPlan.feedback?.[i] ? "Feedback" : ""}</td></tr>`).join("");
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Competency Plan — ${xmlEscape(activeCompPlan.category)} ${activeCompPlan.year}</title><style>body{font-family:Calibri,Arial,sans-serif} table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:8px} th{background:#0F766E;color:#fff} h1{color:#0F766E}</style></head><body><table style="border:none;width:100%"><tr><td style="border:none"><img src="${mohLogo}" width="120" alt="MOH logo"></td><td style="border:none;text-align:right"><strong>Ministry of Health — Oman</strong><br>Directorate of Health Services<br>North Al Batinah</td></tr></table><h1>Competency Plan — ${xmlEscape(activeCompPlan.category)} · ${activeCompPlan.year}</h1><p>Category: ${xmlEscape(activeCompPlan.category)} &nbsp;|&nbsp; Year: ${activeCompPlan.year} &nbsp;|&nbsp; Status: ${activeCompPlan.active ? "Active" : "Deactivated — view only"}</p><table><tr><th>Month</th><th>Procedure</th><th>Feedback</th></tr>${rows}</table><p>Blocks: ${getBlocks(activeCompPlan).length} &nbsp;|&nbsp; Generated from North Al Batinah — Nursing Audit System</p></body></html>`;
+    const blob = new Blob(["\ufeff" + html], { type: "application/msword" });
+    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `Competency_Plan_${activeCompPlan.category}_${activeCompPlan.year}.doc`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   async function createPlan(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
@@ -1010,13 +960,13 @@ export default function App() {
     <div className="noprint border-b border-[var(--line)] bg-[var(--surface2)]">
       <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-2 px-4 py-2.5">
         <div className="flex gap-2">
-          <button onClick={() => { setPart("1"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "1"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "1" ? "bg-[var(--teal)] text-white" : "bg-white border border-[var(--line)] text-[var(--ink)]"}`}>Part 1 — Documentation</button>
-          <button onClick={() => { setPart("2"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "2"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "2" ? "bg-[var(--teal)] text-white" : "bg-white border border-[var(--line)] text-[var(--ink)]"}`}>Part 2 — Competency</button>
+          <button onClick={() => { setPart("1"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "1"} style={part === "1" ? { background: "#0d6e6b", color: "#ffffff" } : { background: "#ffffff", color: "#102a2c", border: "1px solid #cbd5d1" }} className="rounded-full px-4 py-2 text-sm font-black">Part 1 — Documentation</button>
+          <button onClick={() => { setPart("2"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "2"} style={part === "2" ? { background: "#1d4ed8", color: "#ffffff" } : { background: "#ffffff", color: "#102a2c", border: "1px solid #cbd5d1" }} className="rounded-full px-4 py-2 text-sm font-black">Part 2 — Competency</button>
         </div>
         <div className="ml-2 hidden h-6 w-px bg-[var(--line)] sm:block" />
         <nav className="no-scrollbar flex flex-nowrap gap-1 overflow-x-auto sm:flex-wrap sm:overflow-visible">
           {tabs.map(t => (
-            <button key={t} onClick={() => setTab(t)} className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold ${tab === t ? "bg-[var(--ink)] text-white" : "bg-white border border-[var(--line)] text-[var(--ink)] hover:bg-[var(--surface)]"}`}>{t}</button>
+            <button key={t} onClick={() => setTab(t)} style={tab === t ? { background: "#0d6e6b", color: "#ffffff", border: "2px solid #0d6e6b" } : { background: "#ffffff", color: "#102a2c", border: "1px solid #cbd5d1" }} className="shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-black">{t}</button>
           ))}
         </nav>
       </div>
@@ -1156,7 +1106,7 @@ export default function App() {
                                   type="button"
                                   onClick={() => openCell(v, period)}
                                   className={`cellBtn ${s?.comment ? "hasComment" : ""}`}
-                                  style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44 }}
+                                  style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44, color: 'inherit', fontWeight: 700 }}
                                   aria-label={`Edit ${labelFor(v.wilayat, v.institution)} ${period} score ${s?.score || "empty"}`}
                                 >
                                   {s ? s.score : "—"}
@@ -1226,7 +1176,7 @@ export default function App() {
                                   type="button"
                                   onClick={() => openCell(v, period, "2", category)}
                                   className={`cellBtn ${s?.comment ? "hasComment" : ""}`}
-                                  style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44 }}
+                                  style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44, color: 'inherit', fontWeight: 700 }}
                                   aria-label={`Edit ${labelFor(v.wilayat, v.institution)} ${blockLabel(block)} ${s?.score || "empty"}`}
                                 >
                                   {s ? s.score : "—"}
@@ -1280,7 +1230,6 @@ export default function App() {
                           value={scoreInput}
                           onChange={e => setScoreInput(e.target.value)}
                           placeholder="e.g. 95 or NA"
-                          inputMode="decimal"
                           autoComplete="off"
                           className={`mt-1 w-full ${!isScoreValid(scoreInput) && scoreInput !== "" ? "border-red-500" : ""}`}
                           style={{ fontSize: 16, minHeight: 48 }}

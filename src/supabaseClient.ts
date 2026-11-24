@@ -1,156 +1,85 @@
-// Supabase client without external dependency — uses REST API directly
-// Implements minimal API needed by App.tsx: from(table).select(), upsert, delete, etc.
-// Keeps isSupabaseConfigured flag based on VITE_SUPABASE_URL + KEY env.
+// supabaseClient.ts — matches App.tsx imports:
+// isSupabaseConfigured, supabaseLoadAll, supabaseUpsert, supabaseDelete, sbSave, sbLoadAll
+// Table: audit_data (id text PK, data jsonb, updated_at timestamptz)
+// Uses VITE_SUPABASE_URL + VITE_SUPABASE_PUBLISHABLE_KEY (fallback VITE_SUPABASE_ANON_KEY)
+// Both Vercel vars must hold the SAME sb_publishable_... key.
 
-function readEnv(key: string): string {
-  try {
-    // @ts-ignore Vite
-    const metaEnv = (import.meta as any)?.env;
-    if (metaEnv && metaEnv[key]) return String(metaEnv[key]).trim();
-  } catch {}
-  try {
-    // @ts-ignore Node / process
-    const pe = typeof process !== "undefined" ? (process as any).env : null;
-    if (pe && pe[key]) return String(pe[key]).trim();
-  } catch {}
-  try {
-    // @ts-ignore window injection
-    const win = typeof window !== "undefined" ? (window as any) : null;
-    if (win && win.__ENV && win.__ENV[key]) return String(win.__ENV[key]).trim();
-  } catch {}
-  return "";
-}
+const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL as string | undefined;
+const SUPABASE_KEY =
+  ((import.meta as any).env?.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ||
+  ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string | undefined) ||
+  "";
 
-const urlRaw = readEnv("VITE_SUPABASE_URL");
-const keyRaw = readEnv("VITE_SUPABASE_PUBLISHABLE_KEY") || readEnv("VITE_SUPABASE_ANON_KEY") || "";
+export const isSupabaseConfigured = Boolean(
+  SUPABASE_URL && SUPABASE_URL.startsWith("http") && SUPABASE_KEY && SUPABASE_KEY.trim().length > 10
+);
 
-const supabaseUrl = urlRaw;
-const supabaseKey = keyRaw;
-
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
-
-function headers() {
+function headers(extra: Record<string, string> = {}) {
   return {
-    apikey: supabaseKey,
-    Authorization: `Bearer ${supabaseKey}`,
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
     "Content-Type": "application/json",
-  } as Record<string, string>;
-}
-
-async function sbFetch(path: string, init?: RequestInit) {
-  if (!isSupabaseConfigured) throw new Error("Supabase not configured");
-  const base = supabaseUrl.replace(/\/$/, "");
-  const full = `${base}/rest/v1/${path}`;
-  const res = await fetch(full, { ...init, headers: { ...headers(), ...(init?.headers as any || {}) } });
-  const text = await res.text();
-  let data: any = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if (!res.ok) throw new Error((data && (data.message || data.error || data.msg)) || `Supabase error ${res.status}`);
-  return data;
-}
-
-export type AuditDataRow = { id: string; data: any; updated_at?: string };
-
-export async function supabaseLoadAll(): Promise<AuditDataRow[]> {
-  if (!isSupabaseConfigured) return [];
-  try {
-    const rows = await sbFetch("audit_data?select=*");
-    return (rows as AuditDataRow[]) || [];
-  } catch {
-    return [];
-  }
-}
-
-export async function supabaseUpsert(id: string, dataObj: any): Promise<boolean> {
-  if (!isSupabaseConfigured) return false;
-  try {
-    await sbFetch("audit_data", {
-      method: "POST",
-      body: JSON.stringify({ id, data: dataObj, updated_at: new Date().toISOString() }),
-      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-    });
-    // The above with merge-duplicates may not work on all setups, try upsert via PATCH fallback
-    return true;
-  } catch {
-    // Try alternative upsert via ?on_conflict=id
-    try {
-      await sbFetch("audit_data?on_conflict=id", {
-        method: "POST",
-        body: JSON.stringify({ id, data: dataObj, updated_at: new Date().toISOString() }),
-        headers: { Prefer: "resolution=merge-duplicates" } as any,
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
-export async function supabaseDelete(id: string): Promise<boolean> {
-  if (!isSupabaseConfigured) return false;
-  try {
-    await sbFetch(`audit_data?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// Minimal supabase-like object for compatibility with older code
-function createTableClient(table: string) {
-  return {
-    select: async (_cols = "*") => {
-      return await sbFetch(`${table}?select=*`);
-    },
-    upsert: async (row: any, opts?: any) => {
-      const onConflict = opts?.onConflict || "id";
-      return await sbFetch(`${table}?on_conflict=${onConflict}`, {
-        method: "POST",
-        body: JSON.stringify(row),
-        headers: { Prefer: "resolution=merge-duplicates" } as any,
-      });
-    },
+    ...extra,
   };
 }
 
-export const supabase = isSupabaseConfigured ? {
-  from: (table: string) => ({
-    select: async (cols = "*") => {
-      try {
-        const data = await sbFetch(`${table}?select=${encodeURIComponent(cols)}`);
-        return { data, error: null };
-      } catch (e: any) {
-        return { data: null, error: e };
-      }
-    },
-    upsert: async (row: any, opts?: any) => {
-      try {
-        const onConflict = opts?.onConflict || "id";
-        const data = await sbFetch(`${table}?on_conflict=${onConflict}`, {
-          method: "POST",
-          body: JSON.stringify(row),
-          headers: { Prefer: "resolution=merge-duplicates", "Content-Type": "application/json" } as any,
-        });
-        return { data, error: null };
-      } catch (e: any) {
-        return { data: null, error: e };
-      }
-    },
-    delete: () => ({
-      eq: async (col: string, val: string) => {
-        try {
-          await sbFetch(`${table}?${col}=eq.${encodeURIComponent(val)}`, { method: "DELETE" });
-          return { error: null };
-        } catch (e: any) {
-          return { error: e };
-        }
-      }
-    }),
-  }),
-  url: supabaseUrl,
-} : null;
+function baseUrl() {
+  return String(SUPABASE_URL || "").replace(/\/$/, "");
+}
 
-export function getDataSourceLabel(): string {
-  if (isSupabaseConfigured) return "Live • Supabase • Shared";
-  return "Local mode • Offline";
+// Load ALL rows: returns { ok, rows, reason } — rows are { id, data, updated_at }
+export async function sbLoadAll(): Promise<{ ok: boolean; rows: any[]; reason?: string }> {
+  if (!isSupabaseConfigured) return { ok: false, rows: [], reason: "no-config" };
+  try {
+    const res = await fetch(`${baseUrl()}/rest/v1/audit_data?select=*`, { headers: headers() });
+    if (!res.ok) return { ok: false, rows: [], reason: `HTTP ${res.status}` };
+    const rows = await res.json();
+    return { ok: true, rows: Array.isArray(rows) ? rows : [] };
+  } catch (e: any) {
+    return { ok: false, rows: [], reason: String(e?.message || e || "fetch failed") };
+  }
+}
+
+// Legacy alias used by older App code — same shape as sbLoadAll
+export async function supabaseLoadAll() {
+  return sbLoadAll();
+}
+
+// Save / upsert ONE row: returns { ok, reason }
+export async function sbSave(id: string, dataObj: any): Promise<{ ok: boolean; reason?: string }> {
+  if (!isSupabaseConfigured) return { ok: false, reason: "no-config" };
+  try {
+    const res = await fetch(`${baseUrl()}/rest/v1/audit_data?on_conflict=id`, {
+      method: "POST",
+      headers: headers({ Prefer: "resolution=merge-duplicates,return=representation" }),
+      body: JSON.stringify({ id, data: dataObj, updated_at: new Date().toISOString() }),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      return { ok: false, reason: `HTTP ${res.status} ${txt.slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, reason: String(e?.message || e || "save failed") };
+  }
+}
+
+// Legacy alias: supabaseUpsert(id, data)
+export async function supabaseUpsert(id: string, dataObj: any) {
+  return sbSave(id, dataObj);
+}
+
+// Delete ONE row by id
+export async function supabaseDelete(id: string): Promise<{ ok: boolean; reason?: string }> {
+  if (!isSupabaseConfigured) return { ok: false, reason: "no-config" };
+  try {
+    const res = await fetch(`${baseUrl()}/rest/v1/audit_data?id=eq.${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: headers(),
+    });
+    if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` };
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, reason: String(e?.message || e || "delete failed") };
+  }
 }

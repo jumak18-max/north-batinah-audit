@@ -403,9 +403,11 @@ export default function App() {
       arr.forEach((v) => m.set(key(v), v));
       return [...m.values()];
     };
-    const dedupedPlans = dedupBy(newPlans, (p) => `${p.topic}||${p.year}`);
+    // V4: dedup plans with Active = OR. Supabase holds old + new rows for same topic.
+    // If any copy is Active, keep Active. Never let an old inactive copy turn it off.
+    const dedupedPlans = (() => { const m = new Map<string, any>(); newPlans.forEach(v => { const k = `${v.topic}||${v.year}`; const e = m.get(k); m.set(k, e ? { ...v, active: !!(e.active || v.active) } : v); }); return [...m.values()]; })();
     const dedupedScores = dedupBy(newScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
-    const dedupedCompPlans = dedupBy(newCompPlans, (p) => `${p.category}||${p.year}`);
+    const dedupedCompPlans = (() => { const m = new Map<string, any>(); newCompPlans.forEach(v => { const k = `${v.category}||${v.year}`; const e = m.get(k); m.set(k, e ? { ...v, active: !!(e.active || v.active) } : v); }); return [...m.values()]; })();
     const dedupedCompScores = dedupBy(newCompScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
     // MERGE, never replace: a fetch that runs seconds after a save may not yet
     // include that just-saved row. Replacing would wipe it from the screen.
@@ -415,8 +417,8 @@ export default function App() {
     // planId). So merge scores by wilayat||institution||period||topic, ignoring
     // planId, and keep the local plan id. Never let a plan copy hide a score.
     if (dedupedScores.length) setScores(prev => { const m = new Map(prev.map(x => [`${x.wilayat}||${x.institution}||${x.period}||${x.topic || ''}`, x])); dedupedScores.forEach(x => { const k = `${x.wilayat}||${x.institution}||${x.period}||${x.topic || ''}`; const existing = m.get(k); m.set(k, existing ? { ...x, planId: existing.planId, id: existing.id } : x); }); return [...m.values()]; });
-    if (dedupedPlans.length) setPlans(prev => { const m = new Map(prev.map(x => [`${x.topic}||${x.year}`, x])); dedupedPlans.forEach(x => { const k = `${x.topic}||${x.year}`; const existing = m.get(k); m.set(k, existing ? { ...x, id: existing.id } : x); }); return [...m.values()]; });
-    if (dedupedCompPlans.length) setCompPlans(prev => { const m = new Map(prev.map(x => [`${x.category}||${x.year}`, x])); dedupedCompPlans.forEach(x => { const k = `${x.category}||${x.year}`; const existing = m.get(k); m.set(k, existing ? { ...x, id: existing.id } : x); }); return [...m.values()]; });
+    if (dedupedPlans.length) setPlans(prev => { const m = new Map(prev.map(x => [`${x.topic}||${x.year}`, x])); dedupedPlans.forEach(x => { const k = `${x.topic}||${x.year}`; const existing = m.get(k); m.set(k, existing ? { ...x, id: existing.id, active: !!(existing.active || x.active) } : x); }); return [...m.values()]; });
+    if (dedupedCompPlans.length) setCompPlans(prev => { const m = new Map(prev.map(x => [`${x.category}||${x.year}`, x])); dedupedCompPlans.forEach(x => { const k = `${x.category}||${x.year}`; const existing = m.get(k); m.set(k, existing ? { ...x, id: existing.id, active: !!(existing.active || x.active) } : x); }); return [...m.values()]; });
     if (dedupedCompScores.length) setCompScores(prev => { const m = new Map(prev.map(x => [`${x.wilayat}||${x.institution}||${x.period}||${x.category || ''}`, x])); dedupedCompScores.forEach(x => { const k = `${x.wilayat}||${x.institution}||${x.period}||${x.category || ''}`; const existing = m.get(k); m.set(k, existing ? { ...x, planId: existing.planId, id: existing.id } : x); }); return [...m.values()]; });
     if (newInst.length) setInstOverrides(newInst);
     if (newProc.length) setProcOverrides(newProc);

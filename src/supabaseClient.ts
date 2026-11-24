@@ -67,7 +67,7 @@ export async function supabaseUpsert(id: string, dataObj: any): Promise<boolean>
     await sbFetch("audit_data", {
       method: "POST",
       body: JSON.stringify({ id, data: dataObj, updated_at: new Date().toISOString() }),
-      headers: { Prefer: "resolution=merge-duplicates,return=representation" } as any, as any,
+      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     });
     // The above with merge-duplicates may not work on all setups, try upsert via PATCH fallback
     return true;

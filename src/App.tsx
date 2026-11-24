@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { BarChart3, ClipboardCheck, Download, LogOut, MessageSquare, Search, Settings2, Users, HelpCircle, X, CheckCircle2, ChevronDown, Eye, EyeOff, History, Filter, RefreshCw, Trash2 } from "lucide-react";
-import mohLogo from "./assets/de5a2654c982994c-MOH_Logo.png";
+import mohLogo from "../assets/de5a2654c982994c-MOH_Logo.png";
 import { isSupabaseConfigured, supabase, supabaseLoadAll, supabaseUpsert, supabaseDelete, getDataSourceLabel } from "./supabaseClient";
 
 type Role = "Master" | "Admin" | "Wilayat";

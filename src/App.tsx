@@ -540,6 +540,17 @@ export default function App() {
     return forTopic.find(p => p.active) || forTopic[0];
   }, [plans, topic, planId]);
   useEffect(() => { if (activePlan && planId !== activePlan.id) setPlanId(activePlan.id); }, [activePlan]);
+  // 3 - Entering Plans page = fresh editor: clear any previously selected procedures/feedback
+  // (so an old plan's O2 therapy etc. does not stay in the form)
+  const prevTabRef = (globalThis as any).__prevTabRef || ((globalThis as any).__prevTabRef = { current: "" });
+  useEffect(() => {
+    if (tab === "Plans" && prevTabRef.current !== "Plans") {
+      setEditingCompPlanId("");
+      setCompProcSearch(Array(12).fill(undefined as any)); setOpenProcIdx(null);
+      setNewCompPlan(prev => ({ ...prev, procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] }));
+    }
+    prevTabRef.current = tab;
+  }, [tab]);
   const activeCompPlan = useMemo(() => {
     const forCat = compPlans.filter(p => p.category === category);
     if (compPlanId) { const f = forCat.find(p => p.id === compPlanId); if (f) return f; }
@@ -686,6 +697,8 @@ export default function App() {
       if (partOverride !== "2" && activePlan && !activePlan.active) { setLiveToast("This Part 1 plan is deactivated — view only. Ask Admin to activate it to edit."); return; }
     }
     if (partOverride === "2") {
+      const _fIdx = MONTHS.indexOf(period);
+      if (_fIdx >= 0 && activeCompPlan?.feedback?.[_fIdx]) { setLiveToast("This month is Obtaining Feedback — it cannot receive a score."); return; }
       const ex = findCompScore(v.wilayat, v.institution, period);
       setSelectedCell({ wilayat: v.wilayat, institution: v.institution, period, part: "2", category: catOverride || category });
       setScoreInput(ex ? ex.score : ""); setCommentInput(ex ? ex.comment : ""); setAuditorNameInput(ex?.auditorName || auditorProfiles.find(p => p.username === user.username)?.lastName || ""); setSaveMsg(""); return;
@@ -1006,16 +1019,16 @@ export default function App() {
   );
 
   const PartTabsBar = (
-    <div className="noprint border-b border-[var(--line)] bg-[var(--surface2)]">
+    <div className="noprint border-b border-[var(--teal2)] bg-[var(--teal)]">
       <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-2 px-4 py-2.5">
         <div className="flex gap-2">
-          <button onClick={() => { setPart("1"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "1"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "1" ? "bg-[var(--teal)] text-white" : "bg-white border border-[var(--line)] text-[var(--ink)]"}`}>Part 1 — Documentation</button>
-          <button onClick={() => { setPart("2"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "2"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "2" ? "bg-[var(--teal)] text-white" : "bg-white border border-[var(--line)] text-[var(--ink)]"}`}>Part 2 — Competency</button>
+          <button onClick={() => { setPart("1"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "1"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "1" ? "bg-white text-[var(--teal)]" : "bg-white/15 border border-white/40 text-white hover:bg-white/25"}`}>Part 1 — Documentation</button>
+          <button onClick={() => { setPart("2"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "2"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "2" ? "bg-white text-[var(--teal)]" : "bg-white/15 border border-white/40 text-white hover:bg-white/25"}`}>Part 2 — Competency</button>
         </div>
         <div className="ml-2 hidden h-6 w-px bg-[var(--line)] sm:block" />
         <nav className="no-scrollbar flex flex-nowrap gap-1 overflow-x-auto sm:flex-wrap sm:overflow-visible">
           {tabs.map(t => (
-            <button key={t} onClick={() => setTab(t)} className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold ${tab === t ? "bg-[var(--ink)] text-white" : "bg-white border border-[var(--line)] text-[var(--ink)] hover:bg-[var(--surface)]"}`}>{t}</button>
+            <button key={t} onClick={() => setTab(t)} className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold ${tab === t ? "bg-white text-[var(--teal)]" : "bg-white/15 border border-white/40 text-white hover:bg-white/25"}`}>{t}</button>
           ))}
         </nav>
       </div>
@@ -1105,8 +1118,8 @@ export default function App() {
             {tab !== "Control Panel" && tab !== "Guide" && part === "1" && <>
               <section className="card mb-4 p-3 sm:p-4">
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                  <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Topic</label><div className="mt-1 flex flex-wrap gap-1">{TOPICS.map(t => <button key={t} onClick={() => setTopic(t)} className={`rounded-full px-3 py-1.5 text-sm font-bold ${topic === t ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{t}</button>)}</div></div>
-                  <label className="text-sm font-bold">Plan<select value={activePlan?.id || ""} onChange={e => setPlanId(e.target.value)} className="mt-1 w-full"><option value="">No plan for this topic</option>{plans.filter(p => p.topic === topic).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label>
+                  <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Topic</label><div className="mt-1 flex flex-wrap gap-1">{TOPICS.map(t => <button key={t} onClick={() => { setTopic(t); setPlanId(""); }} className={`rounded-full px-3 py-1.5 text-sm font-bold ${topic === t ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{t}</button>)}</div></div>
+                  <div><label className="text-sm font-bold">Plan<select value={planId} onChange={e => setPlanId(e.target.value)} className="mt-1 w-full" style={{ minHeight: 44 }}><option value="">No plan for this topic</option>{plans.filter(p => p.topic === topic).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label><div className="mt-1 flex flex-wrap gap-1">{plans.filter(p => p.topic === topic).map(p => <button key={p.id} type="button" onClick={() => setPlanId(p.id)} className={`rounded-full px-3 py-1.5 text-xs font-bold ${planId === p.id || (!planId && activePlan?.id === p.id) ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{p.year}{p.active ? "" : " · Off"}</button>)}</div></div>
                   <div className="flex flex-wrap items-end gap-2">
                     
                     <div className="flex gap-2"><button onClick={exportCSV} disabled={!activePlan} className="rounded-lg bg-[var(--blue)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Download className="mr-1 inline" size={16} />CSV</button></div>
@@ -1178,8 +1191,8 @@ export default function App() {
             {tab !== "Control Panel" && tab !== "Guide" && part === "2" && <>
               <section className="card mb-4 p-3 sm:p-4">
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                  <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Category</label><div className="mt-1 flex flex-wrap gap-1">{CATEGORIES.map(c => <button key={c} onClick={() => setCategory(c)} className={`rounded-full px-3 py-1.5 text-sm font-bold ${category === c ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{c}</button>)}</div></div>
-                  <label className="text-sm font-bold">Plan<select value={activeCompPlan?.id || ""} onChange={e => setCompPlanId(e.target.value)} className="mt-1 w-full"><option value="">No plan for this category</option>{compPlans.filter(p => p.category === category).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label>
+                  <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Category</label><div className="mt-1 flex flex-wrap gap-1">{CATEGORIES.map(c => <button key={c} onClick={() => { setCategory(c); setCompPlanId(""); }} className={`rounded-full px-3 py-1.5 text-sm font-bold ${category === c ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{c}</button>)}</div></div>
+                  <div><label className="text-sm font-bold">Plan<select value={compPlanId} onChange={e => setCompPlanId(e.target.value)} className="mt-1 w-full" style={{ minHeight: 44 }}><option value="">No plan for this category</option>{compPlans.filter(p => p.category === category).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label><div className="mt-1 flex flex-wrap gap-1">{compPlans.filter(p => p.category === category).map(p => <button key={p.id} type="button" onClick={() => setCompPlanId(p.id)} className={`rounded-full px-3 py-1.5 text-xs font-bold ${compPlanId === p.id || (!compPlanId && activeCompPlan?.id === p.id) ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{p.year}{p.active ? "" : " · Off"}</button>)}</div></div>
                   <div className="flex flex-wrap items-end gap-2">
                     
                     <button onClick={exportCSV} disabled={!activeCompPlan} className="rounded-lg bg-[var(--blue)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Download className="mr-1 inline" size={16} />CSV</button>
@@ -1212,10 +1225,10 @@ export default function App() {
                           return <tr key={v.wilayat + v.institution} className={isEditingRow ? "editing-row" : ""}>
                             <td className="font-bold [overflow-wrap:anywhere]">{labelFor(v.wilayat, v.institution)}<span className="block text-xs font-normal text-[var(--muted)]">{v.wilayat}</span></td>
                             {activeCompPlan.periods.map((period, idx) => {
-                              if (activeCompPlan.feedback?.[idx]) return <td key={idx} style={{ background: "#ede9fe" }}><span className="text-xs font-bold">Feedback</span></td>;
+                              if (activeCompPlan.feedback?.[idx]) return <td key={idx} style={{ background: "#ede9fe" }} title="Obtaining Feedback — no score"><span className="text-xs font-bold">Feedback — no score</span></td>;
                               if (!activeCompPlan.procedures?.[idx]) return <td key={idx}></td>;
                               const block = blockForMonth(activeCompPlan, idx); if (!block) return <td key={idx}></td>;
-                              if (idx !== block.start) { const s = findBlockScore(v.wilayat, v.institution, block); return <td key={idx} style={s ? scoreColor(s.score) : {}}><span className="text-xs text-[var(--muted)]">{s ? `Covered — ${s.period}` : ""}</span></td>; }
+                              if (idx !== block.start) return null; // colSpan on the start cell already covers this month — rendering another <td> here shifted every later column (Apr-May looked covered in Jan, Jun-Jul looked blocked, Feedback appeared outside the table)
                               const s = findBlockScore(v.wilayat, v.institution, block);
                               const isEditingCell = selectedCell && selectedCell.wilayat === v.wilayat && selectedCell.institution === v.institution && selectedCell.period === period;
                               return <td key={idx} className={isEditingCell ? "editing-cell" : ""} style={s ? scoreColor(s.score) : {}} colSpan={block.end - block.start + 1}>
@@ -1246,8 +1259,8 @@ export default function App() {
             {tab === "Plans" && isAdmin && <section className="card p-4">
               <h2 className="text-xl font-black">Plans</h2><p className="mt-1 text-sm text-[var(--muted)]">Create Monthly plans (Jan-Dec). Plans are saved to the shared audit_data table — only the changed plan row is upserted. {dbLabel}</p>
               <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                <form onSubmit={createPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 1 plan</h3><label className="mt-3 block text-sm font-bold">Topic<select value={newPlan.topic} onChange={e => setNewPlan({ ...newPlan, topic: e.target.value })} className="mt-1 w-full">{TOPICS.map(t => <option key={t} value={t}>{t}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newPlan.year} onChange={e => setNewPlan({ ...newPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 1 plan</button></form>
-                <form onSubmit={createCompPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">{editingCompPlanId ? "Edit Part 2 plan" : "Create Part 2 plan"}</h3><label className="mt-3 block text-sm font-bold">Category<select value={newCompPlan.category} onChange={e => setNewCompPlan({ ...newCompPlan, category: e.target.value })} className="mt-1 w-full">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newCompPlan.year} onChange={e => setNewCompPlan({ ...newCompPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><div className="mt-4 space-y-2"><p className="text-xs font-bold uppercase text-[var(--muted)]">Month by month — tap to open, type to filter inside the list</p>{MONTHS.map((m, i) => {
+                <form onSubmit={createPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 1 plan</h3><label className="mt-3 block text-sm font-bold">Topic<select value={newPlan.topic} onChange={e => setNewPlan({ ...newPlan, topic: e.target.value })} className="mt-1 w-full">{TOPICS.map(t => <option key={t} value={t}>{t}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<select value={newPlan.year} onChange={e => setNewPlan({ ...newPlan, year: Number(e.target.value) })} className="mt-1 w-full">{Array.from({ length: 14 }, (_, k) => 2027 + k).map(y => <option key={y} value={y}>{y}</option>)}</select></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 1 plan</button></form>
+                <form onSubmit={createCompPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">{editingCompPlanId ? "Edit Part 2 plan" : "Create Part 2 plan"}</h3><label className="mt-3 block text-sm font-bold">Category<select value={newCompPlan.category} onChange={e => { setNewCompPlan({ ...newCompPlan, category: e.target.value, procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] }); setCompProcSearch(Array(12).fill(undefined as any)); setOpenProcIdx(null); }} className="mt-1 w-full">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<select value={newCompPlan.year} onChange={e => { setNewCompPlan({ ...newCompPlan, year: Number(e.target.value), procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] }); setCompProcSearch(Array(12).fill(undefined as any)); setOpenProcIdx(null); }} className="mt-1 w-full">{Array.from({ length: 14 }, (_, k) => 2027 + k).map(y => <option key={y} value={y}>{y}</option>)}</select></label><div className="mt-4 space-y-2"><p className="text-xs font-bold uppercase text-[var(--muted)]">Month by month — tap to open, type to filter inside the list</p>{MONTHS.map((m, i) => {
           const isFb = !!newCompPlan.feedback[i];
           const shown = isFb ? "Obtaining Feedback" : newCompPlan.procedures[i] ? newCompPlan.procedures[i]! : "Skipped";
           const q = (compProcSearch[i] ?? "").trim().toLowerCase();
@@ -1309,7 +1322,6 @@ export default function App() {
                           value={scoreInput}
                           onChange={e => setScoreInput(e.target.value)}
                           placeholder="e.g. 95 or NA"
-                          inputMode="decimal"
                           autoComplete="off"
                           className={`mt-1 w-full ${!isScoreValid(scoreInput) && scoreInput !== "" ? "border-red-500" : ""}`}
                           style={{ fontSize: 16, minHeight: 48 }}

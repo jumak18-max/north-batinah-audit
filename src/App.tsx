@@ -262,9 +262,6 @@ export default function App() {
       return { ...prev, procedures, feedback };
     });
   }
-  const [editingCompPlanId, setEditingCompPlanId] = useState("");
-  const [editingProcedures, setEditingProcedures] = useState<(string | null)[]>([]);
-  const [editingFeedback, setEditingFeedback] = useState<boolean[]>([]);
   const [instForm, setInstForm] = useState({ wilayat: "Suhar", name: "", assignments: ["Part 1"] as string[] });
   const [editingInst, setEditingInst] = useState<EffInst | null>(null);
   const [instMsg, setInstMsg] = useState("");

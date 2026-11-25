@@ -82,7 +82,6 @@ function formatLiveTime(iso?: string): string {
 }
 function labelFor(w: string, inst: string) { return cleanInstitutionName(inst, w); }
 function scoreColor(s: string) {
-  // Explicit hex + dark text on every range. Never white-on-pale-green (unreadable, see screenshot).
   if (s === "NA") return { background: "#FDE68A", color: "#111111", fontWeight: 700 };
   const n = parseFloat(s); if (isNaN(n)) return {};
   if (n >= 95) return { background: "#C9EAD9", color: "#0B3D2E", fontWeight: 700 };
@@ -253,6 +252,16 @@ export default function App() {
   const [compPlanId, setCompPlanId] = useState("");
   const [newPlan, setNewPlan] = useState({ topic: TOPICS[0], year: 2027 });
   const [newCompPlan, setNewCompPlan] = useState({ category: CATEGORIES[0] as string, year: 2027, procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] });
+  const [editingCompPlanId, setEditingCompPlanId] = useState<string | null>(null);
+  function setCompMonth(i: number, mode: "procedure" | "skip" | "feedback", proc?: string | null) {
+    setNewCompPlan(prev => {
+      const procedures = [...prev.procedures]; const feedback = [...prev.feedback];
+      if (mode === "skip") { procedures[i] = null; feedback[i] = false; }
+      else if (mode === "feedback") { procedures[i] = null; feedback[i] = true; }
+      else { procedures[i] = proc ?? procedures[i]; feedback[i] = false; }
+      return { ...prev, procedures, feedback };
+    });
+  }
   const [editingCompPlanId, setEditingCompPlanId] = useState("");
   const [editingProcedures, setEditingProcedures] = useState<(string | null)[]>([]);
   const [editingFeedback, setEditingFeedback] = useState<boolean[]>([]);
@@ -815,13 +824,64 @@ export default function App() {
     try { await syncSaveFirst(`competency_plans_${plan.id}`, { id: plan.id, category: plan.category, year: plan.year, frequency: plan.frequency, periods: plan.periods, procedures: plan.procedures, feedback: plan.feedback, active: next }); } catch {}
     setLiveToast(next ? `${plan.category} · ${plan.year} activated.` : `${plan.category} · ${plan.year} deactivated — Wilayat view only.`);
   }
-  // 5 - Export Competency plan to Word (.doc) with MOH logo header
-  function exportCompPlanWord() {
+  // 5 - Export Competency plan to Word (.doc) — SAME style/text as previous chat version.
+  // Logo must be EMBEDDED as base64 (Word cannot open a /assets/... path), so we fetch the
+  // imported logo file and convert it to a data URL before building the file.
+  async function exportCompPlanWord() {
     if (!activeCompPlan) return;
-    const rows = activeCompPlan.periods.map((m, i) => `<tr><td>${m}</td><td>${xmlEscape(displayProcedure(activeCompPlan.procedures?.[i]) || "—")}</td><td>${activeCompPlan.feedback?.[i] ? "Feedback" : ""}</td></tr>`).join("");
-    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Competency Plan — ${xmlEscape(activeCompPlan.category)} ${activeCompPlan.year}</title><style>body{font-family:Calibri,Arial,sans-serif} table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:8px} th{background:#0F766E;color:#fff} h1{color:#0F766E}</style></head><body><table style="border:none;width:100%"><tr><td style="border:none"><img src="${mohLogo}" width="120" alt="MOH logo"></td><td style="border:none;text-align:right"><strong>Ministry of Health — Oman</strong><br>Directorate of Health Services<br>North Al Batinah</td></tr></table><h1>Competency Plan — ${xmlEscape(activeCompPlan.category)} · ${activeCompPlan.year}</h1><p>Category: ${xmlEscape(activeCompPlan.category)} &nbsp;|&nbsp; Year: ${activeCompPlan.year} &nbsp;|&nbsp; Status: ${activeCompPlan.active ? "Active" : "Deactivated — view only"}</p><table><tr><th>Month</th><th>Procedure</th><th>Feedback</th></tr>${rows}</table><p>Blocks: ${getBlocks(activeCompPlan).length} &nbsp;|&nbsp; Generated from North Al Batinah — Nursing Audit System</p></body></html>`;
-    const blob = new Blob(["\ufeff" + html], { type: "application/msword" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `Competency_Plan_${activeCompPlan.category}_${activeCompPlan.year}.doc`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const shortCat = activeCompPlan.category.includes("Renal") ? "RMC" : activeCompPlan.category.includes("Labour") ? "Labour Rooms" : activeCompPlan.category;
+    const title = `${shortCat} Competency Procedures plan ${activeCompPlan.year}`;
+    // --- Logo as base64 (fixes "logo can't display") ---
+    let logoDataUrl = "";
+    try {
+      const res = await fetch(mohLogo);
+      const blob = await res.blob();
+      logoDataUrl = await new Promise<string>((resolve) => { const r = new FileReader(); r.onload = () => resolve(String(r.result || "")); r.onerror = () => resolve(""); r.readAsDataURL(blob); });
+    } catch { logoDataUrl = ""; }
+    const logoImg = logoDataUrl ? `<img src="${logoDataUrl}" alt="Ministry of Health logo" style="height:72px;width:auto;" />` : "";
+    // --- Build rows: one row per unique procedure/block, highlight months according to plan ---
+    // Walk months in order, group consecutive months with the same procedure into one block.
+    type PlanRow = { name: string; months: Set<number>; feedback: boolean };
+    const rows: PlanRow[] = [];
+    const blocks = getBlocks(activeCompPlan);
+    // Use blocks (same logic as grid) so a procedure repeated for 3 months = 1 row with 3 highlighted months.
+    blocks.forEach((b) => {
+      const proc = displayProcedure(activeCompPlan.procedures?.[b.start]) || "";
+      const months = new Set<number>(); for (let i = b.start; i <= b.end; i++) months.add(i);
+      rows.push({ name: proc, months, feedback: false, _start: b.start } as any);
+    });
+    // Feedback months are skipped by getBlocks, so group consecutive feedback months into their own row(s)
+    // in the same order as the plan (e.g. Nov-Dec = one "Obtaining Feedback" row, purple).
+    {
+      let i = 0;
+      while (i < 12) {
+        if (!activeCompPlan.feedback?.[i]) { i++; continue; }
+        let j = i; while (j + 1 < 12 && activeCompPlan.feedback?.[j + 1]) j++;
+        const months = new Set<number>(); for (let k = i; k <= j; k++) months.add(k);
+        rows.push({ name: "Obtaining Feedback", months, feedback: true, _start: i } as any);
+        i = j + 1;
+      }
+      rows.sort((a: any, b: any) => a._start - b._start);
+    }
+    // Fallback: if no blocks (empty plan), show one row per month
+    if (rows.length === 0) {
+      activeCompPlan.periods.forEach((_, i) => {
+        const isFb = !!activeCompPlan.feedback?.[i];
+        rows.push({ name: isFb ? "Obtaining Feedback" : (displayProcedure(activeCompPlan.procedures?.[i]) || "—"), months: new Set([i]), feedback: isFb });
+      });
+    }
+    const monthHeaders = MONTHS.map(m => `<th style="width:6.5%;">${m}</th>`).join("");
+    const bodyRows = rows.map((r, idx) => {
+      const cells = MONTHS.map((_, mi) => {
+        if (r.feedback && r.months.has(mi)) return `<td style="background:#ede9fe;color:#4c1d95;font-size:8pt;font-weight:bold;text-align:center;">Obtaining Feedback</td>`;
+        if (r.months.has(mi)) return `<td style="background:#c9ead9;">&nbsp;</td>`;
+        return `<td>&nbsp;</td>`;
+      }).join("");
+      return `<tr><td style="text-align:center;">${idx + 1}</td><td style="text-align:left;">${xmlEscape(r.name)}</td>${cells}</tr>`;
+    }).join("");
+    const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${xmlEscape(title)}</title><style>@page WordSection1{size:29.7cm 21cm;mso-page-orientation:landscape;margin:1cm 1cm 1cm 1cm;} div.WordSection1{page:WordSection1;} body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#102a2c;} p{margin:4pt 0;} table{border-collapse:collapse;width:100%;font-size:9pt;} th,td{border:1pt solid #7a8a88;padding:4pt 5pt;text-align:center;vertical-align:middle;} th{background:#0d6e6b;color:#ffffff;font-weight:bold;} thead{display:table-header-group;} tr{page-break-inside:avoid;}</style></head><body><div class="WordSection1"><div style="text-align:center;"><p style="text-align:center;margin:0 0 6pt;">${logoImg}</p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">North Batinah Governorate</p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Nursing Service Department</p><p style="font-size:15pt;font-weight:bold;margin:4pt 0 10pt;">${xmlEscape(title)}</p></div><table><thead><tr><th style="width:5%;">Serial Number</th><th style="width:22%;text-align:left;">Planned Procedures</th>${monthHeaders}</tr></thead><tbody>${bodyRows}</tbody></table></div></body></html>`;
+    const outBlob = new Blob(["\ufeff" + html], { type: "application/msword" });
+    const url = URL.createObjectURL(outBlob); const a = document.createElement("a"); a.href = url; a.download = `${title.replace(/\s+/g, "_")}.doc`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   async function createPlan(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
@@ -839,13 +899,14 @@ export default function App() {
   async function createCompPlan(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
     try {
-      const value = { category: newCompPlan.category, year: newCompPlan.year, frequency: "Monthly", periods: [...MONTHS], procedures: newCompPlan.procedures, feedback: newCompPlan.feedback, active: true };
-      const newId = `compplan-${Date.now()}`;
+      const editing = editingCompPlanId ? compPlans.find(p => p.id === editingCompPlanId) : null;
+      const value = { category: newCompPlan.category, year: newCompPlan.year, frequency: "Monthly", periods: [...MONTHS], procedures: newCompPlan.procedures, feedback: newCompPlan.feedback, active: editing ? editing.active : true };
+      const newId = editing ? editing.id : `compplan-${Date.now()}`;
       const newP: CompPlan = { id: newId, ...value };
-      setCompPlans(prev => [...prev.filter(p => !(p.category === value.category && p.year === value.year)), newP]);
+      setCompPlans(prev => editing ? prev.map(p => p.id === newId ? newP : p) : [...prev.filter(p => !(p.category === value.category && p.year === value.year)), newP]);
       await syncSaveFirst(`competency_plans_${newId}`, { id: newId, ...value });
       try { await api("records.create", { collection: "competency_plans", value, idempotency_key: `compplan-${newCompPlan.category}-${newCompPlan.year}-${Date.now()}` }); } catch {}
-      setLiveToast("Part 2 plan created."); setCategory(newCompPlan.category);
+      setLiveToast(editingCompPlanId ? "Part 2 plan updated." : "Part 2 plan created."); setCategory(newCompPlan.category); setEditingCompPlanId(null);
     } catch (err: any) { setSaveMsg(`Could not create Part 2 plan: ${err.message}`); }
     setBusy(false);
   }
@@ -960,8 +1021,8 @@ export default function App() {
     <div className="noprint border-b border-[var(--line)] bg-[var(--surface2)]">
       <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-2 px-4 py-2.5">
         <div className="flex gap-2">
-          <button onClick={() => { setPart("1"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "1"} style={part === "1" ? { background: "#0d6e6b", color: "#ffffff" } : { background: "#ffffff", color: "#102a2c", border: "1px solid #cbd5d1" }} className="rounded-full px-4 py-2 text-sm font-black">Part 1 — Documentation</button>
-          <button onClick={() => { setPart("2"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "2"} style={part === "2" ? { background: "#1d4ed8", color: "#ffffff" } : { background: "#ffffff", color: "#102a2c", border: "1px solid #cbd5d1" }} className="rounded-full px-4 py-2 text-sm font-black">Part 2 — Competency</button>
+          <button onClick={() => { setPart("1"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "1"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "1" ? "bg-[var(--teal)] text-white" : "bg-white border border-[var(--line)] text-[var(--ink)]"}`}>Part 1 — Documentation</button>
+          <button onClick={() => { setPart("2"); setTab("Dashboard"); setSelectedCell(null); }} aria-pressed={part === "2"} className={`rounded-full px-4 py-2 text-sm font-black ${part === "2" ? "bg-[var(--teal)] text-white" : "bg-white border border-[var(--line)] text-[var(--ink)]"}`}>Part 2 — Competency</button>
         </div>
         <div className="ml-2 hidden h-6 w-px bg-[var(--line)] sm:block" />
         <nav className="no-scrollbar flex flex-nowrap gap-1 overflow-x-auto sm:flex-wrap sm:overflow-visible">
@@ -1200,11 +1261,11 @@ export default function App() {
               <h2 className="text-xl font-black">Plans</h2><p className="mt-1 text-sm text-[var(--muted)]">Create Monthly plans (Jan-Dec). Plans are saved to the shared audit_data table — only the changed plan row is upserted. {dbLabel}</p>
               <div className="mt-4 grid gap-4 lg:grid-cols-2">
                 <form onSubmit={createPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 1 plan</h3><label className="mt-3 block text-sm font-bold">Topic<select value={newPlan.topic} onChange={e => setNewPlan({ ...newPlan, topic: e.target.value })} className="mt-1 w-full">{TOPICS.map(t => <option key={t} value={t}>{t}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newPlan.year} onChange={e => setNewPlan({ ...newPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 1 plan</button></form>
-                <form onSubmit={createCompPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 2 plan</h3><label className="mt-3 block text-sm font-bold">Category<select value={newCompPlan.category} onChange={e => setNewCompPlan({ ...newCompPlan, category: e.target.value })} className="mt-1 w-full">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newCompPlan.year} onChange={e => setNewCompPlan({ ...newCompPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 2 plan</button></form>
+                <form onSubmit={createCompPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">{editingCompPlanId ? "Edit Part 2 plan" : "Create Part 2 plan"}</h3><label className="mt-3 block text-sm font-bold">Category<select value={newCompPlan.category} onChange={e => setNewCompPlan({ ...newCompPlan, category: e.target.value })} className="mt-1 w-full">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newCompPlan.year} onChange={e => setNewCompPlan({ ...newCompPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><div className="mt-4 space-y-2"><p className="text-sm font-bold">Month by month — for each month choose Procedure, Skip month, or Obtaining Feedback</p>{MONTHS.map((m, i) => { const mode = newCompPlan.feedback[i] ? "feedback" : newCompPlan.procedures[i] ? "procedure" : "skip"; return <div key={m} className="rounded-lg border p-2"><div className="flex flex-wrap items-center gap-2"><span className="w-10 text-sm font-black">{m}</span><select value={mode} onChange={e => setCompMonth(i, e.target.value as any)} className="flex-1 min-w-[130px]"><option value="procedure">Procedure</option><option value="skip">Skip month</option><option value="feedback">Obtaining Feedback</option></select>{mode === "procedure" && <select value={newCompPlan.procedures[i] || ""} onChange={e => setCompMonth(i, "procedure", e.target.value || null)} className="w-full"><option value="">— Select procedure —</option>{PROCEDURES.map(pr => <option key={pr} value={pr}>{pr}</option>)}</select>}{mode === "feedback" && <span className="rounded bg-[#ede9fe] px-2 py-1 text-xs font-bold text-[#4c1d95]">Obtaining Feedback — no score</span>}{mode === "skip" && <span className="text-xs text-[var(--muted)]">Skipped — no score</span>}</div></div>; })}</div>{editingCompPlanId && <button type="button" onClick={() => { setEditingCompPlanId(null); setNewCompPlan({ category: CATEGORIES[0] as string, year: 2027, procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] }); }} className="mt-3 w-full rounded-lg border py-2 font-bold">Cancel edit — back to Create</button>}<button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingCompPlanId ? "Save changes to Part 2 plan" : "Create Part 2 plan"}</button></form>
               </div>
               <div className="mt-6 grid gap-4 lg:grid-cols-2">
                 <div><h3 className="font-extrabold">Part 1 plans ({plans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{plans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.topic} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : "Deactivated"}</span><button type="button" onClick={() => togglePart1PlanActive(p)} className="rounded-full border px-2 py-1 text-xs font-bold">{p.active ? "Deactivate" : "Activate"}</button><button type="button" onClick={() => { setTopic(p.topic); setPlanId(p.id); setTab("Audit Grid"); setPart("1"); }} className="rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
-                <div><h3 className="font-extrabold">Part 2 plans ({compPlans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{compPlans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.category} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : "Deactivated"} · {getBlocks(p).length} blocks</span><button type="button" onClick={() => toggleCompPlanActive(p)} className="rounded-full border px-2 py-1 text-xs font-bold">{p.active ? "Deactivate" : "Activate"}</button><button type="button" onClick={() => { setCategory(p.category); setCompPlanId(p.id); setTab("Audit Grid"); setPart("2"); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
+                <div><h3 className="font-extrabold">Part 2 plans ({compPlans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{compPlans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.category} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : "Deactivated"} · {getBlocks(p).length} blocks</span><button type="button" onClick={() => toggleCompPlanActive(p)} className="rounded-full border px-2 py-1 text-xs font-bold">{p.active ? "Deactivate" : "Activate"}</button><button type="button" onClick={() => { setCategory(p.category); setCompPlanId(p.id); setTab("Audit Grid"); setPart("2"); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Open</button><button type="button" onClick={() => { setEditingCompPlanId(p.id); setNewCompPlan({ category: p.category, year: p.year, procedures: [...(p.procedures || Array(12).fill(null))], feedback: [...(p.feedback || Array(12).fill(false))] }); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="rounded-full border px-2 py-1 text-xs font-bold">Edit</button></div>)}</div></div>
               </div>
             </section>}
 

@@ -105,7 +105,7 @@ function sheetRowsToXml(rows: string[][]): string {
       const col = colLetter(ci); const ref = `${col}${rNum}`;
       if (val === null || val === undefined) val = "";
       const str = String(val); const s = isHeader ? ` s="1"` : ` s="0"`;
-      if (isNumericCell(str)) { return `<c r="${ref}"${s}><v>${xmlEscape(str)}</v></c>`; } else { return `<c r="${ref}" t="inlineStr"${s}><is><t>${xmlEscape(str)}</t></is></c>`; }
+      if (isNumericCell(str)) { return `<c r="${ref}"${s}><v>${xmlEscape(str)}</v></c>`; } else { return `<c r="${ref}" t="inlineStr"${s}><is><t xml:space="preserve">${xmlEscape(str)}</t></is></c>`; }
     }).join("");
     return `<row r="${rNum}"${isHeader ? ' ht="20"' : ""}>${cells}</row>`;
   }).join("");
@@ -147,7 +147,7 @@ function downloadXLSX(filename: string, sheets: { name: string, rows: string[][]
   const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
   const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${safeSheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${safeSheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
   const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${safeSheets.map((sh, i) => `<sheet name="${xmlEscape(sh.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`;
-  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor rgb="FF0F766E"/></patternFill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color auto="1"/></left><right style="thin"><color auto="1"/></right><top style="thin"><color auto="1"/></top><bottom style="thin"><color auto="1"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" alignment="1" horizontal="center" vertical="center"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor rgb="FF0F766E"/></patternFill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color auto="1"/></left><right style="thin"><color auto="1"/></right><top style="thin"><color auto="1"/></top><bottom style="thin"><color auto="1"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0"><alignment horizontal="center" vertical="center"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
   const files: ZipFile[] = [
     { name: "[Content_Types].xml", data: strToBytes(contentTypes) },
     { name: "_rels/.rels", data: strToBytes(rels) },
@@ -197,7 +197,7 @@ function saveLocalBackup(_state: any) {}
 function loadLocalBackup(): any | null { return null; }
 
 export default function App() {
-  useEffect(() => { document.title = "North Al Batinah — Nursing Audit System"; }, []);
+  useEffect(() => { document.title = "NBG - Nursing Audit System"; }, []);
   // Login persistence: per-device localStorage (NOT Supabase).
   // Supabase row "audit_current_user" was shared for everyone, so one
   // device logging in overwrote another device's login. localStorage
@@ -571,7 +571,7 @@ export default function App() {
   const findCompScore = (w: string, inst: string, period: string) => compPlanScores.find(s => s.wilayat === w && s.institution === inst && s.period === period);
   const activeBlocks = useMemo(() => getBlocks(activeCompPlan), [activeCompPlan]);
   const findBlockScore = (w: string, inst: string, block: Block): CompScore | undefined => {
-    const cands = compPlanScores.filter(s => s.wilayat === w && s.institution === inst && block.months.includes(MONTH_INDEX[s.period] ?? -1));
+    const cands = compPlanScores.filter(s => s.wilayat === w && s.institution === inst && block.months.includes(MONTH_INDEX[s.period] ?? -1) && (!s.procedure || s.procedure === block.procedure));
     if (!cands.length) return undefined;
     return [...cands].sort((a, b) => { const da = a.auditedAt ? new Date(a.auditedAt).getTime() : 0; const db = b.auditedAt ? new Date(b.auditedAt).getTime() : 0; if (db !== da) return db - da; return (MONTH_INDEX[b.period] ?? 0) - (MONTH_INDEX[a.period] ?? 0); })[0];
   };
@@ -816,6 +816,27 @@ export default function App() {
     try { await syncSaveFirst(`audit_plans_${plan.id}`, { id: plan.id, topic: plan.topic, year: plan.year, frequency: plan.frequency, periods: plan.periods, active: next }); } catch {}
     setLiveToast(next ? `${plan.topic} · ${plan.year} activated.` : `${plan.topic} · ${plan.year} deactivated — Wilayat view only.`);
   }
+  async function deletePart1Plan(plan: Plan) {
+    if (!window.confirm(`Delete Part 1 plan ${plan.topic} · ${plan.year}? Its scores will also be deleted.`)) return;
+    setPlans(prev => prev.filter(x => x.id !== plan.id));
+    setScores(prev => prev.filter(s => s.planId !== plan.id && !(s.topic === plan.topic && s.year === plan.year)));
+    try { await supabaseDelete(`audit_plans_${plan.id}`); } catch {}
+    try { await api("records.delete", { collection: "audit_plans", id: plan.id }); } catch {}
+    const stale = scores.filter(s => s.planId === plan.id || (s.topic === plan.topic && s.year === plan.year));
+    for (const s of stale) { try { await supabaseDelete(`audit_scores_${s.id}`); } catch {} try { await api("records.delete", { collection: "audit_scores", id: s.id }); } catch {} }
+    setLiveToast(`Part 1 plan ${plan.topic} · ${plan.year} deleted.`);
+  }
+  async function deleteCompPlan(plan: CompPlan) {
+    if (!window.confirm(`Delete Part 2 plan ${plan.category} · ${plan.year}? Its scores will also be deleted.`)) return;
+    setCompPlans(prev => prev.filter(x => x.id !== plan.id));
+    setCompScores(prev => prev.filter(s => s.planId !== plan.id && !(s.category === plan.category && s.year === plan.year)));
+    try { await supabaseDelete(`competency_plans_${plan.id}`); } catch {}
+    try { await api("records.delete", { collection: "competency_plans", id: plan.id }); } catch {}
+    const stale = compScores.filter(s => s.planId === plan.id || (s.category === plan.category && s.year === plan.year));
+    for (const s of stale) { try { await supabaseDelete(`competency_scores_${s.id}`); } catch {} try { await api("records.delete", { collection: "competency_scores", id: s.id }); } catch {} }
+    if (editingCompPlanId === plan.id) setEditingCompPlanId(null);
+    setLiveToast(`Part 2 plan ${plan.category} · ${plan.year} deleted.`);
+  }
   async function toggleCompPlanActive(plan: CompPlan) {
     const next = !plan.active;
     setCompPlans(prev => prev.map(x => x.id === plan.id ? { ...x, active: next } : x));
@@ -904,7 +925,23 @@ export default function App() {
       setCompPlans(prev => editing ? prev.map(p => p.id === newId ? newP : p) : [...prev.filter(p => !(p.category === value.category && p.year === value.year)), newP]);
       await syncSaveFirst(`competency_plans_${newId}`, { id: newId, ...value });
       try { await api("records.create", { collection: "competency_plans", value, idempotency_key: `compplan-${newCompPlan.category}-${newCompPlan.year}-${Date.now()}` }); } catch {}
-      setLiveToast(editingCompPlanId ? "Part 2 plan updated." : "Part 2 plan created."); setCategory(newCompPlan.category); setEditingCompPlanId(null);
+      if (editing) {
+        const staleScores = compScores.filter(s => {
+          if (s.planId !== newId && !(s.category === value.category && s.year === value.year)) return false;
+          if (s.year !== value.year) return true;
+          const mi = MONTH_INDEX[s.period] ?? -1; if (mi < 0) return true;
+          if (value.feedback?.[mi]) return true;
+          const planned = value.procedures?.[mi]; if (!planned) return true;
+          if (s.procedure && s.procedure !== planned) return true;
+          return false;
+        });
+        if (staleScores.length) {
+          setCompScores(prev => prev.filter(s => !staleScores.some(x => x.id === s.id)));
+          for (const s of staleScores) { try { await supabaseDelete(`competency_scores_${s.id}`); } catch {} try { await api("records.delete", { collection: "competency_scores", id: s.id }); } catch {} }
+          setLiveToast(`Part 2 plan updated — ${staleScores.length} score(s) cleared: plan no longer matches (year / procedure / Feedback).`);
+        } else setLiveToast("Part 2 plan updated.");
+      } else setLiveToast("Part 2 plan created.");
+      setCategory(newCompPlan.category); setEditingCompPlanId(null);
     } catch (err: any) { setSaveMsg(`Could not create Part 2 plan: ${err.message}`); }
     setBusy(false);
   }
@@ -969,8 +1006,8 @@ export default function App() {
         <img src={mohLogo} alt="MOH Logo" className="h-10 w-auto shrink-0 rounded-lg bg-white p-1 object-contain" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-2">
-            <h1 className="truncate text-[15px] font-black leading-tight sm:text-[17px]">North Al Batinah — Nursing Audit System</h1>
-            <span className="hidden text-xs font-semibold text-white/80 sm:inline">Directorate of Health Services • {headerRoleText}</span>
+            <h1 className="truncate text-[15px] font-black leading-tight sm:text-[17px]">NBG - Nursing Audit System</h1>
+            <span className="hidden text-xs font-semibold text-white/80 sm:inline">DGHS • {headerRoleText}</span>
             <span className="truncate text-[11px] font-semibold text-white/80 sm:hidden">{headerRoleText} • {user?.wilayat}</span>
           </div>
         </div>
@@ -1038,8 +1075,8 @@ export default function App() {
         <div className="mx-auto max-w-6xl px-3 py-6 sm:px-6">
           <div className="mb-5 flex flex-col items-center text-center">
             <div className="rounded-2xl bg-white p-3 shadow-sm"><img src={mohLogo} alt="Ministry of Health logo" className="h-[76px] w-auto object-contain sm:h-[84px]" /></div>
-            <p className="mt-3 text-xs font-bold tracking-[.2em] uppercase text-[var(--muted)]">Directorate of Health Services</p>
-            <h1 className="mt-2 text-[clamp(1.8rem,5vw,2.8rem)] font-black leading-[1.05]">North Al Batinah — Nursing Audit System</h1>
+            <p className="mt-3 text-xs font-bold tracking-[.2em] uppercase text-[var(--muted)]">DGHS</p>
+            <h1 className="mt-2 text-[clamp(1.8rem,5vw,2.8rem)] font-black leading-[1.05]">NBG - Nursing Audit System</h1>
           </div>
           <div className="overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface)]">
             <div className="grid md:grid-cols-2">
@@ -1056,7 +1093,7 @@ export default function App() {
                 <p className="mt-3 text-center text-xs text-white/70">{isSupabaseConfigured ? "Live • Supabase • Shared Database" : "Local mode — add VITE_SUPABASE env to enable cross-PC sync"}</p>
               </div>
               <div className="p-5 sm:p-7">
-                <h2 className="text-xl font-extrabold">Sign in</h2><p className="text-sm text-[var(--muted)]">Choose a demo account, or type a username and password.</p>
+                <h2 className="text-xl font-extrabold">Sign in</h2><p className="text-sm text-[var(--muted)]">Choose account and type password.</p>
                 <form onSubmit={login} className="mt-4 space-y-3">
                   <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="username" /></label>
                   <label className="block text-sm font-bold">Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} className="mt-1 w-full" autoComplete="current-password" /></label>
@@ -1066,11 +1103,11 @@ export default function App() {
                   <button className="w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white">{security.locked ? "Master Unlock" : "Sign in"}</button>
                 </form>
                 <div className="mt-5">
-                  <p className="mt-3 text-xs font-bold uppercase tracking-wider text-[var(--muted)]">Demo logins — tap to fill</p>
+                  
                   <div className="mt-2 grid grid-cols-2 gap-2">
-                    {effectiveUsers.map(u => <button key={u.username} onClick={() => { setUsername(u.username); setPassword(u.password); }} className="rounded-lg border border-[var(--line)] px-2 py-2 text-left text-sm hover:bg-[var(--surface2)]">
+                    {effectiveUsers.map(u => <button key={u.username} onClick={() => { setUsername(u.username); setPassword(""); }} className="rounded-lg border border-[var(--line)] px-2 py-2 text-left text-sm hover:bg-[var(--surface2)]">
                       <span className="block font-bold capitalize">{u.label} {u.role === "Wilayat" ? "— Wilayat" : ""}</span>
-                      <span className="text-xs text-[var(--muted)]">{u.username} · ••••••••</span>
+                      <span className="text-xs text-[var(--muted)]">{u.username}</span>
                     </button>)}
                   </div>
                 </div>
@@ -1118,9 +1155,8 @@ export default function App() {
                   <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Topic</label><div className="mt-1 flex flex-wrap gap-1">{TOPICS.map(t => <button key={t} onClick={() => setTopic(t)} className={`rounded-full px-3 py-1.5 text-sm font-bold ${topic === t ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{t}</button>)}</div></div>
                   <label className="text-sm font-bold">Plan<select value={activePlan?.id || ""} onChange={e => setPlanId(e.target.value)} className="mt-1 w-full"><option value="">No plan for this topic</option>{plans.filter(p => p.topic === topic).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label>
                   <div className="flex flex-wrap items-end gap-2">
-                    {isAdmin && <label className="flex-1 text-sm font-bold">Wilayat filter<select value={wilayatFilter} onChange={e => setWilayatFilter(e.target.value)} className="mt-1 w-full"><option value="All">All Wilayats</option>{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w} ({(effPart1[w] || []).length})</option>)}</select></label>}
-                    <label className="flex-1 min-w-[180px] text-sm font-bold"><span className="flex items-center gap-1"><Search size={14} /> Search</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. Suhar EHC" className="mt-1 w-full" /></label>
-                    <div className="flex gap-2"><button onClick={exportCSV} disabled={!activePlan} className="rounded-lg bg-[var(--blue)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Download className="mr-1 inline" size={16} />CSV</button><button onClick={() => setTab("Dashboard")} className="rounded-lg border px-3 py-2 text-sm font-bold">Dashboard</button></div>
+                    
+                    <div className="flex gap-2"><button onClick={exportCSV} disabled={!activePlan} className="rounded-lg bg-[var(--blue)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Download className="mr-1 inline" size={16} />CSV</button></div>
                   </div>
                 </div>
                 {!activePlan && <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">No plan yet for <strong>{topic}</strong>. {isAdmin ? "Create one in Plans." : "Ask Admin to create a plan."}</div>}
@@ -1192,8 +1228,7 @@ export default function App() {
                   <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Category</label><div className="mt-1 flex flex-wrap gap-1">{CATEGORIES.map(c => <button key={c} onClick={() => setCategory(c)} className={`rounded-full px-3 py-1.5 text-sm font-bold ${category === c ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{c}</button>)}</div></div>
                   <label className="text-sm font-bold">Plan<select value={activeCompPlan?.id || ""} onChange={e => setCompPlanId(e.target.value)} className="mt-1 w-full"><option value="">No plan for this category</option>{compPlans.filter(p => p.category === category).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label>
                   <div className="flex flex-wrap items-end gap-2">
-                    {isAdmin && <label className="flex-1 text-sm font-bold">Wilayat filter<select value={wilayatFilter} onChange={e => setWilayatFilter(e.target.value)} className="mt-1 w-full"><option value="All">All Wilayats</option>{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w} ({(effComp[category] || []).length})</option>)}</select></label>}
-                    <label className="flex-1 min-w-[180px] text-sm font-bold"><span className="flex items-center gap-1"><Search size={14} /> Search</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. Suhar RMC" className="mt-1 w-full" /></label>
+                    
                     <button onClick={exportCSV} disabled={!activeCompPlan} className="rounded-lg bg-[var(--blue)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Download className="mr-1 inline" size={16} />CSV</button>
                   </div>
                 </div>
@@ -1259,11 +1294,11 @@ export default function App() {
               <h2 className="text-xl font-black">Plans</h2><p className="mt-1 text-sm text-[var(--muted)]">Create Monthly plans (Jan-Dec). Plans are saved to the shared audit_data table — only the changed plan row is upserted. {dbLabel}</p>
               <div className="mt-4 grid gap-4 lg:grid-cols-2">
                 <form onSubmit={createPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 1 plan</h3><label className="mt-3 block text-sm font-bold">Topic<select value={newPlan.topic} onChange={e => setNewPlan({ ...newPlan, topic: e.target.value })} className="mt-1 w-full">{TOPICS.map(t => <option key={t} value={t}>{t}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newPlan.year} onChange={e => setNewPlan({ ...newPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 1 plan</button></form>
-                <form onSubmit={createCompPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">{editingCompPlanId ? "Edit Part 2 plan" : "Create Part 2 plan"}</h3><label className="mt-3 block text-sm font-bold">Category<select value={newCompPlan.category} onChange={e => setNewCompPlan({ ...newCompPlan, category: e.target.value })} className="mt-1 w-full">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newCompPlan.year} onChange={e => setNewCompPlan({ ...newCompPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><div className="mt-4 space-y-2"><p className="text-sm font-bold">Month by month — one dropdown per month + ☑ Obtaining Feedback tick box</p>{MONTHS.map((m, i) => { const isFb = !!newCompPlan.feedback[i]; const val = newCompPlan.procedures[i] ? newCompPlan.procedures[i]! : "__SKIP__"; const q = (compProcSearch[i] || "").trim().toLowerCase(); const filtered = q ? PROCEDURES.filter(pr => pr.toLowerCase().includes(q)) : PROCEDURES; const visible = newCompPlan.procedures[i] && !filtered.includes(newCompPlan.procedures[i]!) ? [newCompPlan.procedures[i]!, ...filtered] : filtered; return <div key={m} className="rounded-lg border p-2" style={isFb ? { background: "#ede9fe", borderColor: "#a78bfa" } : undefined}><div className="flex flex-wrap items-center gap-2"><span className="w-10 text-sm font-black">{m}</span><input type="text" value={compProcSearch[i] || ""} onChange={e => setCompProcSearch(prev => { const n = [...prev]; n[i] = e.target.value; return n; })} placeholder="🔍 Search procedure…" disabled={isFb} className="flex-1 min-w-[130px] disabled:opacity-50" style={{ fontSize: 14, minHeight: 40 }} /><select value={val} disabled={isFb} onChange={e => { const v = e.target.value; if (v === "__SKIP__") setCompMonth(i, "skip"); else setCompMonth(i, "procedure", v); }} className="w-full disabled:opacity-50"><option value="__SKIP__">— Skip month —</option><optgroup label={q ? `Procedures — ${filtered.length} matching "${compProcSearch[i]}"` : "Procedures"}>{visible.map(pr => <option key={pr} value={pr}>{pr}</option>)}</optgroup></select><label className="flex items-center gap-2 rounded-lg border px-2 py-2 text-sm font-bold" style={isFb ? { background: "#4c1d95", color: "#ffffff", borderColor: "#4c1d95" } : { background: "#ffffff" }}><input type="checkbox" checked={isFb} onChange={e => { if (e.target.checked) setCompMonth(i, "feedback"); else setCompMonth(i, "skip"); }} style={{ width: 18, height: 18, accentColor: "#4c1d95" }} />☑ Obtaining Feedback</label>{isFb && <span className="rounded bg-[#4c1d95] px-2 py-1 text-xs font-bold text-white">Obtaining Feedback — no score</span>}{!isFb && !newCompPlan.procedures[i] && <span className="text-xs text-[var(--muted)]">Skipped — no score</span>}</div></div>; })}</div>{editingCompPlanId && <button type="button" onClick={() => { setEditingCompPlanId(null); setCompProcSearch(Array(12).fill("")); setNewCompPlan({ category: CATEGORIES[0] as string, year: 2027, procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] }); }} className="mt-3 w-full rounded-lg border py-2 font-bold">Cancel edit — back to Create</button>}<button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingCompPlanId ? "Save changes to Part 2 plan" : "Create Part 2 plan"}</button></form>
+                <form onSubmit={createCompPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">{editingCompPlanId ? "Edit Part 2 plan" : "Create Part 2 plan"}</h3><label className="mt-3 block text-sm font-bold">Category<select value={newCompPlan.category} onChange={e => setNewCompPlan({ ...newCompPlan, category: e.target.value })} className="mt-1 w-full">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<input type="number" value={newCompPlan.year} onChange={e => setNewCompPlan({ ...newCompPlan, year: Number(e.target.value) })} className="mt-1 w-full" /></label><div className="mt-4 space-y-2"><p className="text-sm font-bold">Month by month — type in the box to filter the list, then pick</p>{MONTHS.map((m, i) => { const isFb = !!newCompPlan.feedback[i]; const shown = isFb ? "Obtaining Feedback" : newCompPlan.procedures[i] ? newCompPlan.procedures[i]! : "Skipped"; return <div key={m} className="rounded-lg border p-2" style={isFb ? { background: "#ede9fe", borderColor: "#a78bfa" } : undefined}><div className="flex flex-wrap items-center gap-2"><span className="w-10 text-sm font-black">{m}</span><input type="text" list={`proc-list-${i}`} value={compProcSearch[i] ?? shown} onFocus={e => { setCompProcSearch(prev => { const n = [...prev]; n[i] = ""; return n; }); }} onBlur={e => { const v = e.target.value; if (v !== "Obtaining Feedback" && v !== "Skipped" && !PROCEDURES.includes(v)) setCompProcSearch(prev => { const n = [...prev]; n[i] = undefined as any; return n; }); }} onChange={e => { const v = e.target.value; setCompProcSearch(prev => { const n = [...prev]; n[i] = v; return n; }); if (v === "Obtaining Feedback") setCompMonth(i, "feedback"); else if (v === "Skipped" || v === "") setCompMonth(i, "skip"); else if (PROCEDURES.includes(v)) setCompMonth(i, "procedure", v); }} placeholder="🔍 Type to filter — Obtaining Feedback / Skipped / procedure…" className="flex-1 min-w-[180px]" style={{ fontSize: 14, minHeight: 44 }} /><datalist id={`proc-list-${i}`}><option value="Obtaining Feedback" /><option value="Skipped" />{PROCEDURES.map(pr => <option key={pr} value={pr} />)}</datalist>{isFb && <span className="rounded bg-[#4c1d95] px-2 py-1 text-xs font-bold text-white">Obtaining Feedback — no score</span>}{!isFb && !newCompPlan.procedures[i] && <span className="text-xs text-[var(--muted)]">Skipped — no score</span>}</div></div>; })}</div>{editingCompPlanId && <button type="button" onClick={() => { setEditingCompPlanId(null); setCompProcSearch(Array(12).fill("")); setNewCompPlan({ category: CATEGORIES[0] as string, year: 2027, procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] }); }} className="mt-3 w-full rounded-lg border py-2 font-bold">Cancel edit — back to Create</button>}<button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingCompPlanId ? "Save changes to Part 2 plan" : "Create Part 2 plan"}</button></form>
               </div>
               <div className="mt-6 grid gap-4 lg:grid-cols-2">
-                <div><h3 className="font-extrabold">Part 1 plans ({plans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{plans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.topic} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : "Deactivated"}</span><button type="button" onClick={() => togglePart1PlanActive(p)} className="rounded-full border px-2 py-1 text-xs font-bold">{p.active ? "Deactivate" : "Activate"}</button><button type="button" onClick={() => { setTopic(p.topic); setPlanId(p.id); setTab("Audit Grid"); setPart("1"); }} className="rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
-                <div><h3 className="font-extrabold">Part 2 plans ({compPlans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{compPlans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.category} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : "Deactivated"} · {getBlocks(p).length} blocks</span><button type="button" onClick={() => toggleCompPlanActive(p)} className="rounded-full border px-2 py-1 text-xs font-bold">{p.active ? "Deactivate" : "Activate"}</button><button type="button" onClick={() => { setCategory(p.category); setCompPlanId(p.id); setTab("Audit Grid"); setPart("2"); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Open</button><button type="button" onClick={() => { setEditingCompPlanId(p.id); setNewCompPlan({ category: p.category, year: p.year, procedures: [...(p.procedures || Array(12).fill(null))], feedback: [...(p.feedback || Array(12).fill(false))] }); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="rounded-full border px-2 py-1 text-xs font-bold">Edit</button></div>)}</div></div>
+                <div><h3 className="font-extrabold">Part 1 plans ({plans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{plans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.topic} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : "Deactivated"}</span><button type="button" onClick={() => togglePart1PlanActive(p)} className="rounded-full border px-2 py-1 text-xs font-bold">{p.active ? "Deactivate" : "Activate"}</button><button type="button" onClick={() => deletePart1Plan(p)} className="rounded-full border border-red-300 px-2 py-1 text-xs font-bold text-red-700">Delete</button><button type="button" onClick={() => { setTopic(p.topic); setPlanId(p.id); setTab("Audit Grid"); setPart("1"); }} className="rounded-full border px-2 py-1 text-xs font-bold">Open</button></div>)}</div></div>
+                <div><h3 className="font-extrabold">Part 2 plans ({compPlans.length})</h3><div className="mt-2 space-y-2 max-h-[320px] overflow-auto">{compPlans.map(p => <div key={p.id} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold">{p.category} · {p.year}</span><span className="text-xs text-[var(--muted)]">{p.active ? "Active" : "Deactivated"} · {getBlocks(p).length} blocks</span><button type="button" onClick={() => toggleCompPlanActive(p)} className="rounded-full border px-2 py-1 text-xs font-bold">{p.active ? "Deactivate" : "Activate"}</button><button type="button" onClick={() => deleteCompPlan(p)} className="rounded-full border border-red-300 px-2 py-1 text-xs font-bold text-red-700">Delete</button><button type="button" onClick={() => { setCategory(p.category); setCompPlanId(p.id); setTab("Audit Grid"); setPart("2"); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Open</button><button type="button" onClick={() => { setEditingCompPlanId(p.id); setCompProcSearch(Array(12).fill(undefined as any)); setNewCompPlan({ category: p.category, year: p.year, procedures: [...(p.procedures || Array(12).fill(null))], feedback: [...(p.feedback || Array(12).fill(false))] }); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="rounded-full border px-2 py-1 text-xs font-bold">Edit</button></div>)}</div></div>
               </div>
             </section>}
 

@@ -82,11 +82,13 @@ function formatLiveTime(iso?: string): string {
 }
 function labelFor(w: string, inst: string) { return cleanInstitutionName(inst, w); }
 function scoreColor(s: string) {
-  if (s === "NA") return { background: "var(--amber)", color: "#111111" };
+  // Never white-on-pale: var(--green) is a pale mint in this theme, so white text on it was invisible (99.7).
+  // Use explicit solid colours: dark green + white, light yellow + near-black, dark red + white, amber + near-black.
+  if (s === "NA") return { background: "#fbbf24", color: "#111111", fontWeight: 800 };
   const n = parseFloat(s); if (isNaN(n)) return {};
-  if (n >= 95) return { background: "var(--green)", color: "#ffffff" };
-  if (n >= 85) return { background: "#eef6c9", color: "#111111" };
-  return { background: "var(--red)", color: "#ffffff" };
+  if (n >= 95) return { background: "#15803d", color: "#ffffff", fontWeight: 800 };
+  if (n >= 85) return { background: "#fef08a", color: "#111111", fontWeight: 800 };
+  return { background: "#dc2626", color: "#ffffff", fontWeight: 800 };
 }
 function procTag(p: string) { if (p.startsWith("[LR]")) return "LR"; if (p.startsWith("[RMC]")) return "RMC"; return "General"; }
 function stripProcedurePrefix(name: string) { return name.replace(/^\[(LR|RMC)\]\s*/i, "").trim(); }
@@ -859,13 +861,26 @@ export default function App() {
     try { await syncSaveFirst(`competency_plans_${plan.id}`, { id: plan.id, category: plan.category, year: plan.year, frequency: plan.frequency, periods: plan.periods, procedures: plan.procedures, feedback: plan.feedback, active: next }); } catch {}
     setLiveToast(next ? `${plan.category} · ${plan.year} activated.` : `${plan.category} · ${plan.year} deactivated — Wilayat view only.`);
   }
-  // 5 - Export Competency plan to Word (.doc) with MOH logo header
+  // 5 - Export Competency plan to Word (.doc) — last accepted format:
+  // A4 landscape matrix (Serial / Planned Procedures / Jan-Dec) with MOH logo centred,
+  // green #c9ead9 highlight in the months where the procedure is planned.
   function exportCompPlanWord() {
     if (!activeCompPlan) return;
-    const rows = activeCompPlan.periods.map((m, i) => `<tr><td>${m}</td><td>${xmlEscape(displayProcedure(activeCompPlan.procedures?.[i]) || "—")}</td><td>${activeCompPlan.feedback?.[i] ? "Feedback" : ""}</td></tr>`).join("");
-    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Competency Plan — ${xmlEscape(activeCompPlan.category)} ${activeCompPlan.year}</title><style>body{font-family:Calibri,Arial,sans-serif} table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:8px} th{background:#0F766E;color:#fff} h1{color:#0F766E}</style></head><body><table style="border:none;width:100%"><tr><td style="border:none"><img src="${mohLogo}" width="120" alt="MOH logo"></td><td style="border:none;text-align:right"><strong>Ministry of Health — Oman</strong><br>Directorate of Health Services<br>North Al Batinah</td></tr></table><h1>Competency Plan — ${xmlEscape(activeCompPlan.category)} · ${activeCompPlan.year}</h1><p>Category: ${xmlEscape(activeCompPlan.category)} &nbsp;|&nbsp; Year: ${activeCompPlan.year} &nbsp;|&nbsp; Status: ${activeCompPlan.active ? "Active" : "Deactivated — view only"}</p><table><tr><th>Month</th><th>Procedure</th><th>Feedback</th></tr>${rows}</table><p>Blocks: ${getBlocks(activeCompPlan).length} &nbsp;|&nbsp; Generated from North Al Batinah — Nursing Audit System</p></body></html>`;
+    // Rows: one per distinct procedure (in order of first appearance),
+    // then Obtaining Feedback, then Skipped — each row greens its own months.
+    const seen: string[] = []; const rowMonths: number[][] = [];
+    activeCompPlan.periods.forEach((_, i) => {
+      if (activeCompPlan.feedback?.[i]) return; const proc = activeCompPlan.procedures?.[i]; if (!proc) return;
+      const k = seen.indexOf(proc); if (k === -1) { seen.push(proc); rowMonths.push([i]); } else rowMonths[k].push(i);
+    });
+    const fbMonths: number[] = []; const skipMonths: number[] = [];
+    activeCompPlan.periods.forEach((_, i) => { if (activeCompPlan.feedback?.[i]) fbMonths.push(i); else if (!activeCompPlan.procedures?.[i]) skipMonths.push(i); });
+    if (fbMonths.length) { seen.push("Obtaining Feedback"); rowMonths.push(fbMonths); }
+    if (skipMonths.length) { seen.push("— Skipped —"); rowMonths.push(skipMonths); }
+    const rows = seen.map((proc, r) => `<tr><td style="text-align:center;">${r + 1}</td><td style="text-align:left;">${xmlEscape(displayProcedure(proc) || proc)}</td>${activeCompPlan.periods.map((_, i) => `<td${rowMonths[r].includes(i) ? ' style="background:#c9ead9;"' : ""}>&nbsp;</td>`).join("")}</tr>`).join("");
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</title><style>@page WordSection1{size:29.7cm 21cm;mso-page-orientation:landscape;margin:1cm 1cm 1cm 1cm;} div.WordSection1{page:WordSection1;} body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#102a2c;} p{margin:4pt 0;} table{border-collapse:collapse;width:100%;font-size:9pt;} th,td{border:1pt solid #7a8a88;padding:4pt 5pt;text-align:center;vertical-align:middle;} th{background:#0d6e6b;color:#ffffff;font-weight:bold;} thead{display:table-header-group;} tr{page-break-inside:avoid;}</style></head><body><div class="WordSection1"><div style="text-align:center;"><p style="text-align:center;margin:0 0 6pt;"><img src="${mohLogo}" alt="Ministry of Health logo" style="height:72px;width:auto;" /></p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Directorate General of Health Services - NBG</p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Nursing Service Department</p><p style="font-size:15pt;font-weight:bold;margin:4pt 0 10pt;">${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</p></div><table><thead><tr><th style="width:5%;">Serial Number</th><th style="width:22%;text-align:left;">Planned Procedures</th>${activeCompPlan.periods.map(m => `<th style="width:6.5%;">${m}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></body></html>`;
     const blob = new Blob(["\ufeff" + html], { type: "application/msword" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `Competency_Plan_${activeCompPlan.category}_${activeCompPlan.year}.doc`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${activeCompPlan.category.replace(/\s+/g, "_")}_Competency_Procedures_plan_${activeCompPlan.year}.doc`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   async function createPlan(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
@@ -1119,7 +1134,7 @@ export default function App() {
               <section className="card mb-4 p-3 sm:p-4">
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
                   <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Topic</label><div className="mt-1 flex flex-wrap gap-1">{TOPICS.map(t => <button key={t} onClick={() => { setTopic(t); setPlanId(""); }} className={`rounded-full px-3 py-1.5 text-sm font-bold ${topic === t ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{t}</button>)}</div></div>
-                  <div><label className="text-sm font-bold">Plan<select value={planId} onChange={e => setPlanId(e.target.value)} className="mt-1 w-full" style={{ minHeight: 44 }}><option value="">No plan for this topic</option>{plans.filter(p => p.topic === topic).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label><div className="mt-1 flex flex-wrap gap-1">{plans.filter(p => p.topic === topic).map(p => <button key={p.id} type="button" onClick={() => setPlanId(p.id)} className={`rounded-full px-3 py-1.5 text-xs font-bold ${planId === p.id || (!planId && activePlan?.id === p.id) ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{p.year}{p.active ? "" : " · Off"}</button>)}</div></div>
+                  <div><label className="text-sm font-bold">Plan<select value={planId} onChange={e => setPlanId(e.target.value)} className="mt-1 w-full" style={{ minHeight: 44 }}><option value="">No plan for this topic</option>{plans.filter(p => p.topic === topic).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label></div>
                   <div className="flex flex-wrap items-end gap-2">
                     
                     <div className="flex gap-2"><button onClick={exportCSV} disabled={!activePlan} className="rounded-lg bg-[var(--blue)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Download className="mr-1 inline" size={16} />CSV</button></div>
@@ -1167,7 +1182,7 @@ export default function App() {
                                   type="button"
                                   onClick={() => openCell(v, period)}
                                   className={`cellBtn ${s?.comment ? "hasComment" : ""}`}
-                                  style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44 }}
+                                  style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44, color: "inherit", fontWeight: 800 }}
                                   aria-label={`Edit ${labelFor(v.wilayat, v.institution)} ${period} score ${s?.score || "empty"}`}
                                 >
                                   {s ? s.score : "—"}
@@ -1192,7 +1207,7 @@ export default function App() {
               <section className="card mb-4 p-3 sm:p-4">
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
                   <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Category</label><div className="mt-1 flex flex-wrap gap-1">{CATEGORIES.map(c => <button key={c} onClick={() => { setCategory(c); setCompPlanId(""); }} className={`rounded-full px-3 py-1.5 text-sm font-bold ${category === c ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{c}</button>)}</div></div>
-                  <div><label className="text-sm font-bold">Plan<select value={compPlanId} onChange={e => setCompPlanId(e.target.value)} className="mt-1 w-full" style={{ minHeight: 44 }}><option value="">No plan for this category</option>{compPlans.filter(p => p.category === category).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label><div className="mt-1 flex flex-wrap gap-1">{compPlans.filter(p => p.category === category).map(p => <button key={p.id} type="button" onClick={() => setCompPlanId(p.id)} className={`rounded-full px-3 py-1.5 text-xs font-bold ${compPlanId === p.id || (!compPlanId && activeCompPlan?.id === p.id) ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{p.year}{p.active ? "" : " · Off"}</button>)}</div></div>
+                  <div><label className="text-sm font-bold">Plan<select value={compPlanId} onChange={e => setCompPlanId(e.target.value)} className="mt-1 w-full" style={{ minHeight: 44 }}><option value="">No plan for this category</option>{compPlans.filter(p => p.category === category).map(p => <option key={p.id} value={p.id}>{p.year} · Monthly · 12 months{p.active ? " · Active" : ""}</option>)}</select></label></div>
                   <div className="flex flex-wrap items-end gap-2">
                     
                     <button onClick={exportCSV} disabled={!activeCompPlan} className="rounded-lg bg-[var(--blue)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Download className="mr-1 inline" size={16} />CSV</button>
@@ -1236,7 +1251,7 @@ export default function App() {
                                   type="button"
                                   onClick={() => openCell(v, period, "2", category)}
                                   className={`cellBtn ${s?.comment ? "hasComment" : ""}`}
-                                  style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44 }}
+                                  style={{ touchAction: 'manipulation', cursor: 'pointer', minHeight: 44, color: "inherit", fontWeight: 800 }}
                                   aria-label={`Edit ${labelFor(v.wilayat, v.institution)} ${blockLabel(block)} ${s?.score || "empty"}`}
                                 >
                                   {s ? s.score : "—"}
@@ -1307,8 +1322,9 @@ export default function App() {
                     <div className="flex justify-between items-start gap-2">
                       <div>
                         <h3 className="text-lg font-black">Enter audit score</h3>
-                        <p className="mt-1 text-sm font-bold [overflow-wrap:anywhere]">{labelFor(selectedCell.wilayat, selectedCell.institution)} • {selectedCell.period} • {selectedCell.part === "2" ? (selectedCell.category || category) : topic}</p>
-                        <p className="text-xs text-[var(--muted)]">{selectedCell.wilayat} Wilayat • {isSupabaseConfigured ? "Will sync to Supabase" : "Will sync to local backup"}</p>
+                        <p className="mt-1 text-sm font-bold [overflow-wrap:anywhere]">{selectedCell.wilayat} • {labelFor(selectedCell.wilayat, selectedCell.institution)}</p>
+                        <p className="text-sm font-bold [overflow-wrap:anywhere]">{selectedCell.part === "2" ? `${selectedCell.category || category} • ${displayProcedure(activeCompPlan?.procedures?.[MONTH_INDEX[selectedCell.period] ?? -1]) || "—"}` : `Part 1 • ${topic}`}</p>
+                        <p className="text-sm font-bold [overflow-wrap:anywhere]">{selectedCell.part === "2" ? `${activeCompPlan?.year ?? ""} • ${(() => { const _b = blockForMonth(activeCompPlan, MONTH_INDEX[selectedCell.period] ?? -1); return _b ? blockLabel(_b) : selectedCell.period; })()}` : `${activePlan?.year ?? ""} • ${selectedCell.period}`}</p>
                       </div>
                       <button type="button" onClick={() => setSelectedCell(null)} aria-label="Close score dialog" className="rounded-full border p-1" style={{ minHeight: 44, minWidth: 44, touchAction: 'manipulation', cursor: 'pointer' }}><X size={18} /></button>
                     </div>
@@ -1342,7 +1358,6 @@ export default function App() {
                         <textarea value={commentInput} onChange={e => setCommentInput(e.target.value)} rows={3} placeholder="Add a comment for this audit... (optional)" className="mt-1 w-full" style={{ fontSize: 16, minHeight: 80 }} />
                       </label>
                     </div>
-                    <div className="mt-2 rounded bg-white p-2 text-xs text-[var(--muted)]"><div className="font-bold text-[var(--ink)]">How it will appear:</div><div className="mt-1">Audited by: {auditorNameInput.trim() || "—"}</div><div>Added at: {formatMuscat(new Date().toISOString())}</div><div className="mt-1">Sync: shared database — only this row is upserted</div></div>
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button
                         type="button"

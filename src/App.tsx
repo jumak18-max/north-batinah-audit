@@ -624,7 +624,7 @@ export default function App() {
     const overrideMatches = !!override && override.password === entered;
     const passwordOk = override ? overrideMatches : defaultMatches;
     const matchedUser = passwordOk ? (override ? effective : defaultUser) : undefined;
-    if (!matchedUser || !passwordOk) { setLoginError("Incorrect username or password. Use a demo login below."); return; }
+    if (!matchedUser || !passwordOk) { setLoginError("Incorrect username or password."); return; }
     if (security.disabled.includes(matchedUser.username)) { setLoginError("This account has been disabled by Admin."); return; }
     if (security.locked && matchedUser.role !== "Master") { setLoginError("System locked by Master."); return; }
     if (security.accessCodeEnabled && accessCodeInput.trim() !== security.accessCode) { setLoginError("Incorrect Directorate Access Code."); return; }
@@ -1086,23 +1086,15 @@ export default function App() {
               </div>
               <div className="p-5 sm:p-7">
                 <h2 className="text-xl font-extrabold">Sign in</h2><p className="text-sm text-[var(--muted)]">Choose account and type password.</p>
-                <form onSubmit={login} className="mt-4 space-y-3">
-                  <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="username" /></label>
-                  <label className="block text-sm font-bold">Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} className="mt-1 w-full" autoComplete="current-password" /></label>
+                <form onSubmit={login} className="mt-4 space-y-3" autoComplete="off">
+                  <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} name="nbg_username_7x9" /></label>
+                  <label className="block text-sm font-bold">Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} className="mt-1 w-full" autoComplete="new-password" autoCorrect="off" autoCapitalize="off" spellCheck={false} name="nbg_password_7x9" data-lpignore="true" /></label>
                   {security.locked && <label className="block text-sm font-bold">Recovery Code <span className="text-red-600">* Required for Master Unlock</span><input type="password" value={recoveryInput} onChange={e => setRecoveryInput(e.target.value)} className="mt-1 w-full" placeholder="Recovery Code set by Master" autoComplete="off" /></label>}
                   {security.accessCodeEnabled && <label className="block text-sm font-bold">Directorate Access Code <span className="text-red-600">* Required</span><input type="password" value={accessCodeInput} onChange={e => setAccessCodeInput(e.target.value)} className="mt-1 w-full" placeholder="Directorate Access Code" autoComplete="off" /></label>}
                   {loginError && <p className="rounded-lg bg-[var(--red)] p-2 text-sm font-semibold">{loginError}</p>}
                   <button className="w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white">{security.locked ? "Master Unlock" : "Sign in"}</button>
                 </form>
-                <div className="mt-5">
-                  
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    {effectiveUsers.map(u => <button key={u.username} onClick={() => { setUsername(u.username); setPassword(""); }} className="rounded-lg border border-[var(--line)] px-2 py-2 text-left text-sm hover:bg-[var(--surface2)]">
-                      <span className="block font-bold capitalize">{u.label} {u.role === "Wilayat" ? "— Wilayat" : ""}</span>
-                      <span className="text-xs text-[var(--muted)]">{u.username}</span>
-                    </button>)}
-                  </div>
-                </div>
+                {/* Demo login grid removed — browser was offering saved admin password and user requested removal */}
 
 
               </div>
@@ -1141,7 +1133,7 @@ export default function App() {
 
             {tab === "Guide" && <section className="mx-auto max-w-[720px]"><div className="card p-4 sm:p-6"><h2 className="text-[clamp(1.4rem,5vw,1.9rem)] font-black leading-tight">Wilayat Quick Guide — How to Enter Scores on Your Phone</h2><p className="mt-2 text-[15px] text-[var(--muted)]">Simple steps for Wilayat users on a small phone.</p><div className="mt-5 space-y-5 text-[16px] leading-[1.5]"><div className="rounded-xl border bg-[var(--surface2)] p-4"><p className="font-black">Step 1: Open shared link</p><p className="mt-2">Open shared link on phone, log in with Wilayat account, e.g. suhar / suhar123. If no Refresh button, pull down to refresh.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 2: Choose Part</p><p>Choose Part 1 or Part 2 at top.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 3: Year and Topic/Category</p><p>Choose Year and Topic or Category — e.g. 2027 + Crash Cart.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 4: Audit Grid months</p><p>Swipe sideways to see months Jan-Dec. Turn ON Single month view for easiest entry.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 5: Tap a cell</p><p>Tap a cell, e.g. Saham Hospital • Jan. Bottom sheet opens: Score 0-100 or NA, Your Name mandatory, Comment optional, Save.</p></div><div className="rounded-xl border p-4"><p className="font-black">Step 6: Refresh</p><p>Tap Refresh at top to see latest scores from other Wilayats. Live status shows updated time. Supabase sync: Phone A saves → Phone B taps Refresh → sees score.</p></div></div><pre className="mt-4 whitespace-pre-wrap break-words text-[14px] bg-[var(--surface2)] p-3 rounded-xl">{GUIDE_TEXT}</pre></div></section>}
 
-            {tab !== "Control Panel" && tab !== "Guide" && part === "1" && <>
+            {tab !== "Control Panel" && tab !== "Guide" && tab !== "Plans" && part === "1" && <>
               <section className="card mb-4 p-3 sm:p-4">
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
                   <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Topic</label><div className="mt-1 flex flex-wrap gap-1">{TOPICS.map(t => <button key={t} onClick={() => { setTopic(t); setPlanId(""); }} className={`rounded-full px-3 py-1.5 text-sm font-bold ${topic === t ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{t}</button>)}</div></div>
@@ -1214,7 +1206,7 @@ export default function App() {
               </section>}
             </>}
 
-            {tab !== "Control Panel" && tab !== "Guide" && part === "2" && <>
+            {tab !== "Control Panel" && tab !== "Guide" && tab !== "Plans" && part === "2" && <>
               <section className="card mb-4 p-3 sm:p-4">
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
                   <div><label className="text-xs font-bold uppercase text-[var(--muted)]">Category</label><div className="mt-1 flex flex-wrap gap-1">{CATEGORIES.map(c => <button key={c} onClick={() => { setCategory(c); setCompPlanId(""); }} className={`rounded-full px-3 py-1.5 text-sm font-bold ${category === c ? "bg-[var(--teal)] text-white" : "border border-[var(--line)]"}`}>{c}</button>)}</div></div>

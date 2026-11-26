@@ -167,7 +167,18 @@ function downloadXLSX(filename: string, sheets: { name: string, rows: string[][]
   const zipBytes = buildZip(files);
   const zipCopy: Uint8Array<ArrayBuffer> = new Uint8Array(zipBytes);
   const blob = new Blob([zipCopy.buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.style.display = "none";
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
+  if (isIOS) {
+    try { setTimeout(() => window.open(url, "_blank"), 350); } catch {}
+  }
+  setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, isIOS ? 6000 : 2000);
 }
 
 const DEFAULT_PLANS: Plan[] = TOPICS.map(t => ({ id: `default-plan-${t}`, topic: t, year: 2027, frequency: "Monthly", periods: [...MONTHS], active: true }));
@@ -217,8 +228,8 @@ export default function App() {
       return found || null;
     } catch { return null; }
   });
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin123");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [part, setPart] = useState<"1" | "2">("1");
   const [tab, setTab] = useState("Dashboard");
@@ -758,7 +769,7 @@ export default function App() {
         simple.push([v.wilayat, labelFor(v.wilayat, v.institution), category, String(count), ...scoreCells, ...commentCells, ...auditorCells, ...muscatCells, ...isoCells]);
       });
       const csv = simple.map(r => r.map(c => `"${String(c).replaceAll('"', '""')}"`).join(",")).join("\n");
-      const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `competency-${activeCompPlan.category}-${activeCompPlan.year}.csv`; a.click(); URL.revokeObjectURL(url); return;
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.style.display = "none"; a.href = url; a.download = `competency-${activeCompPlan.category}-${activeCompPlan.year}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, 2000); return;
     }
     if (!activePlan) return;
     const rowsHeader = ["Wilayat", "Institution", "Number of Audits", "Average (%)", ...activePlan.periods.map(p => `${p} Score`), ...activePlan.periods.map(p => `${p} Comment`), ...activePlan.periods.map(p => `${p} Audited by`), ...activePlan.periods.map(p => `${p} Added at Muscat DD-MM-YYYY HH:mm`), ...activePlan.periods.map(p => `${p} Added at ISO`)];
@@ -769,7 +780,7 @@ export default function App() {
       rows.push([v.wilayat, labelFor(v.wilayat, v.institution), String(cells.filter(Boolean).length), nums.length ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2) : "", ...cells.map(c => c ? c.score : ""), ...cells.map(c => c ? c.comment : ""), ...cells.map(c => c?.auditorName || ""), ...cells.map(c => c?.auditedAt ? formatMuscat(c.auditedAt) : ""), ...cells.map(c => c?.auditedAt || ""),]);
     });
     const csv = rows.map(r => r.map(c => `"${String(c).replaceAll('"', '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `audit-${activePlan.topic}-${activePlan.year}.csv`; a.click(); URL.revokeObjectURL(url);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.style.display = "none"; a.href = url; a.download = `audit-${activePlan.topic}-${activePlan.year}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, 2000);
   }
 
   function exportPart1StatsExcel() {
@@ -890,8 +901,19 @@ export default function App() {
       return `<tr><td style="text-align:center;">${r + 1}</td><td style="text-align:left;">${procCell}</td>${monthCells}</tr>`;
     }).join("");
     const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</title><style>@page WordSection1{size:29.7cm 21cm;mso-page-orientation:landscape;margin:1cm 1cm 1cm 1cm;} div.WordSection1{page:WordSection1;} body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#102a2c;} p{margin:4pt 0;} table{border-collapse:collapse;width:100%;font-size:9pt;} th,td{border:1pt solid #7a8a88;padding:4pt 5pt;text-align:center;vertical-align:middle;} th{background:#0d6e6b;color:#ffffff;font-weight:bold;} thead{display:table-header-group;} tr{page-break-inside:avoid;}</style></head><body><div class="WordSection1"><div style="text-align:center;"><p style="text-align:center;margin:0 0 6pt;"><img src="${MOH_LOGO_DATA_URL}" alt="Ministry of Health logo" style="height:72px;width:auto;" /></p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Directorate General of Health Services - NBG</p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Nursing Service Department</p><p style="font-size:15pt;font-weight:bold;margin:4pt 0 10pt;">${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</p></div><table><thead><tr><th style="width:5%;">Serial Number</th><th style="width:22%;text-align:left;">Planned Procedures</th>${activeCompPlan.periods.map(m => `<th style="width:6.5%;">${m}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></body></html>`;
-    const blob = new Blob(["\ufeff" + html], { type: "application/msword" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${activeCompPlan.category.replace(/\s+/g, "_")}_Competency_Procedures_plan_${activeCompPlan.year}.doc`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const blob = new Blob(["\ufeff" + html], { type: "application/msword;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.style.display = "none";
+    a.href = url;
+    a.download = `${activeCompPlan.category.replace(/\s+/g, "_")}_Competency_Procedures_plan_${activeCompPlan.year}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    const isIOSWord = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
+    if (isIOSWord) {
+      try { setTimeout(() => window.open(url, "_blank"), 350); } catch {}
+    }
+    setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, isIOSWord ? 6000 : 2000);
   }
   async function createPlan(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
@@ -1086,9 +1108,9 @@ export default function App() {
               </div>
               <div className="p-5 sm:p-7">
                 <h2 className="text-xl font-extrabold">Sign in</h2><p className="text-sm text-[var(--muted)]">Choose account and type password.</p>
-                <form onSubmit={login} className="mt-4 space-y-3" autoComplete="off">
-                  <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} name="nbg_username_7x9" /></label>
-                  <label className="block text-sm font-bold">Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} className="mt-1 w-full" autoComplete="new-password" autoCorrect="off" autoCapitalize="off" spellCheck={false} name="nbg_password_7x9" data-lpignore="true" /></label>
+                <form onSubmit={login} className="mt-4 space-y-3">
+                  <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="username" /></label>
+                  <label className="block text-sm font-bold">Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} className="mt-1 w-full" autoComplete="current-password" /></label>
                   {security.locked && <label className="block text-sm font-bold">Recovery Code <span className="text-red-600">* Required for Master Unlock</span><input type="password" value={recoveryInput} onChange={e => setRecoveryInput(e.target.value)} className="mt-1 w-full" placeholder="Recovery Code set by Master" autoComplete="off" /></label>}
                   {security.accessCodeEnabled && <label className="block text-sm font-bold">Directorate Access Code <span className="text-red-600">* Required</span><input type="password" value={accessCodeInput} onChange={e => setAccessCodeInput(e.target.value)} className="mt-1 w-full" placeholder="Directorate Access Code" autoComplete="off" /></label>}
                   {loginError && <p className="rounded-lg bg-[var(--red)] p-2 text-sm font-semibold">{loginError}</p>}

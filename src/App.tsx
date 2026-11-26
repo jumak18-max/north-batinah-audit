@@ -882,10 +882,11 @@ export default function App() {
     if (skipMonths.length) { seen.push("— Skipped —"); rowMonths.push(skipMonths); }
     const rows = seen.map((proc, r) => {
       const isFbRow = proc === "Obtaining Feedback";
-      // Feedback: procedure column stays EMPTY (never "(Removed procedure)" — that was displayProcedure() being run on the label "Obtaining Feedback"),
-      // and each Feedback month cell is filled with the text "Obtaining feedback".
-      const procCell = isFbRow ? "" : xmlEscape(displayProcedure(proc) || proc);
-      const monthCells = activeCompPlan.periods.map((_, i) => rowMonths[r].includes(i) ? `<td style="background:#c9ead9;">${isFbRow ? "Obtaining feedback" : "&nbsp;"}</td>` : `<td>&nbsp;</td>`).join("");
+      const isSkipRow = proc === "— Skipped —";
+      // Feedback + Skipped: procedure column stays EMPTY (never "(Removed procedure)" — that was displayProcedure() being run on the label),
+      // and each month cell is filled with the text "Obtaining feedback" / "Skipped".
+      const procCell = (isFbRow || isSkipRow) ? "" : xmlEscape(displayProcedure(proc) || proc);
+      const monthCells = activeCompPlan.periods.map((_, i) => rowMonths[r].includes(i) ? `<td style="background:#c9ead9;">${isFbRow ? "Obtaining feedback" : isSkipRow ? "Skipped" : "&nbsp;"}</td>` : `<td>&nbsp;</td>`).join("");
       return `<tr><td style="text-align:center;">${r + 1}</td><td style="text-align:left;">${procCell}</td>${monthCells}</tr>`;
     }).join("");
     const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</title><style>@page WordSection1{size:29.7cm 21cm;mso-page-orientation:landscape;margin:1cm 1cm 1cm 1cm;} div.WordSection1{page:WordSection1;} body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#102a2c;} p{margin:4pt 0;} table{border-collapse:collapse;width:100%;font-size:9pt;} th,td{border:1pt solid #7a8a88;padding:4pt 5pt;text-align:center;vertical-align:middle;} th{background:#0d6e6b;color:#ffffff;font-weight:bold;} thead{display:table-header-group;} tr{page-break-inside:avoid;}</style></head><body><div class="WordSection1"><div style="text-align:center;"><p style="text-align:center;margin:0 0 6pt;"><img src="${MOH_LOGO_DATA_URL}" alt="Ministry of Health logo" style="height:72px;width:auto;" /></p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Directorate General of Health Services - NBG</p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Nursing Service Department</p><p style="font-size:15pt;font-weight:bold;margin:4pt 0 10pt;">${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</p></div><table><thead><tr><th style="width:5%;">Serial Number</th><th style="width:22%;text-align:left;">Planned Procedures</th>${activeCompPlan.periods.map(m => `<th style="width:6.5%;">${m}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></body></html>`;

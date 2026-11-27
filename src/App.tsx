@@ -144,6 +144,93 @@ function buildZip(files: ZipFile[]): Uint8Array {
   push(eocd);
   return out;
 }
+
+
+
+function base64ToBytes(b64: string): Uint8Array {
+  try {
+    const bin = atob(b64);
+    const len = bin.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  } catch {
+    return new Uint8Array();
+  }
+}
+
+function buildDocxBytes(category: string, year: number, seen: string[], rowMonths: number[][], periods: string[], logoDataUrl?: string) {
+  const escapeXml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+  const tableRowsXml = seen.map((proc, r) => {
+    const isFbRow = proc === "Obtaining Feedback";
+    const isSkipRow = proc === "— Skipped —";
+    // Use proc directly, no displayProcedure dependency (fixes scope bug that caused "Could not build Word file")
+    const procText = (isFbRow || isSkipRow) ? "" : escapeXml(proc || "");
+    const serialCell = `<w:tc><w:tcPr><w:tcW w:w="600" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>${r + 1}</w:t></w:r></w:p></w:tc>`;
+    const procCell = `<w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:r><w:t>${procText}</w:t></w:r></w:p></w:tc>`;
+    const monthCells = periods.map((_, i) => {
+      const isPlanned = rowMonths[r].includes(i);
+      const shading = isPlanned ? `<w:shd w:val="clear" w:color="auto" w:fill="c9ead9"/>` : "";
+      let cellText = "";
+      if (isPlanned) {
+        if (isFbRow) cellText = "Obtaining feedback";
+        else if (isSkipRow) cellText = "Skipped";
+      }
+      return `<w:tc><w:tcPr><w:tcW w:w="800" w:type="dxa"/>${shading}<w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>${escapeXml(cellText)}</w:t></w:r></w:p></w:tc>`;
+    }).join("");
+    return `<w:tr>${serialCell}${procCell}${monthCells}</w:tr>`;
+  }).join("");
+
+  const headerRow = `<w:tr><w:trPr><w:tblHeader/></w:trPr>
+    <w:tc><w:tcPr><w:tcW w:w="600" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="0d6e6b"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>Serial</w:t></w:r></w:p></w:tc>
+    <w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="0d6e6b"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>Planned Procedures</w:t></w:r></w:p></w:tc>
+    ${periods.map(m => `<w:tc><w:tcPr><w:tcW w:w="800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="0d6e6b"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>${escapeXml(m)}</w:t></w:r></w:p></w:tc>`).join("")}
+  </w:tr>`;
+
+  let hasLogo = false;
+  let logoB64 = "";
+  let logoExt = "jpeg";
+  if (logoDataUrl && logoDataUrl.startsWith("data:")) {
+    const comma = logoDataUrl.indexOf(",");
+    if (comma > -1) {
+      const meta = logoDataUrl.substring(5, comma);
+      logoB64 = logoDataUrl.substring(comma + 1);
+      if (meta.includes("png")) logoExt = "png";
+      else if (meta.includes("jpeg") || meta.includes("jpg")) logoExt = "jpeg";
+      hasLogo = !!logoB64;
+    }
+  }
+
+  const logoPara = hasLogo ? `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="1828800" cy="1016000"/><wp:docPr id="1" name="MOH Logo"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="MOH Logo"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1828800" cy="1016000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>` : "";
+
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>
+    ${logoPara}
+    <w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:b/><w:sz w:val="26"/></w:rPr></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="26"/></w:rPr><w:t>Directorate General of Health Services - NBG</w:t></w:r></w:p>
+    <w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:b/><w:sz w:val="26"/></w:rPr></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="26"/></w:rPr><w:t>Nursing Service Department</w:t></w:r></w:p>
+    <w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:b/><w:sz w:val="30"/></w:rPr><w:spacing w:after="200"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="30"/></w:rPr><w:t>${escapeXml(category)} Competency Procedures plan ${year}</w:t></w:r></w:p>
+    <w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/><w:left w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/><w:right w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/></w:tblBorders></w:tblPr><w:tblGrid>${["600","3000", ...periods.map(() => "800")].map(w => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>${headerRow}${tableRowsXml}</w:tbl><w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/></w:sectPr></w:body></w:document>`;
+
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`;
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+  const docRels = hasLogo ? `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.${logoExt}"/></Relationships>` : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults></w:styles>`;
+
+  const files: ZipFile[] = [
+    { name: "[Content_Types].xml", data: strToBytes(contentTypes) },
+    { name: "_rels/.rels", data: strToBytes(rels) },
+    { name: "word/_rels/document.xml.rels", data: strToBytes(docRels) },
+    { name: "word/document.xml", data: strToBytes(documentXml) },
+    { name: "word/styles.xml", data: strToBytes(styles) },
+  ];
+  if (hasLogo) {
+    try {
+      const imgBytes = base64ToBytes(logoB64);
+      if (imgBytes.length) files.push({ name: `word/media/image1.${logoExt}`, data: imgBytes });
+    } catch {}
+  }
+  return buildZip(files);
+}
+
 function sanitizeSheetName(name: string) { let s = name.replace(/[\\/*?:\[\]]/g, "_").slice(0, 31); if (!s) s = "Sheet"; return s; }
 function downloadXLSX(filename: string, sheets: { name: string, rows: string[][] }[]) {
   const safeSheets = sheets.map((sh, i) => ({ name: sanitizeSheetName(sh.name || `Sheet${i + 1}`), rows: sh.rows }));
@@ -167,7 +254,18 @@ function downloadXLSX(filename: string, sheets: { name: string, rows: string[][]
   const zipBytes = buildZip(files);
   const zipCopy: Uint8Array<ArrayBuffer> = new Uint8Array(zipBytes);
   const blob = new Blob([zipCopy.buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.style.display = "none";
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
+  if (isIOS) {
+    try { setTimeout(() => window.open(url, "_blank"), 350); } catch {}
+  }
+  setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, isIOS ? 6000 : 2000);
 }
 
 const DEFAULT_PLANS: Plan[] = TOPICS.map(t => ({ id: `default-plan-${t}`, topic: t, year: 2027, frequency: "Monthly", periods: [...MONTHS], active: true }));
@@ -217,8 +315,8 @@ export default function App() {
       return found || null;
     } catch { return null; }
   });
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin123");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [part, setPart] = useState<"1" | "2">("1");
   const [tab, setTab] = useState("Dashboard");
@@ -227,7 +325,15 @@ export default function App() {
   const [overrides, setOverrides] = useState<PwdOverride[]>([]);
   const [compPlans, setCompPlans] = useState<CompPlan[]>(DEFAULT_COMP_PLANS);
   const [compScores, setCompScores] = useState<CompScore[]>(DEFAULT_COMP_SCORES);
+  const [planTombstones, setPlanTombstones] = useState<string[]>(() => {
+    try { const s = localStorage.getItem('audit_tombstones_plans'); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
+  const [compPlanTombstones, setCompPlanTombstones] = useState<string[]>(() => {
+    try { const s = localStorage.getItem('audit_tombstones_compPlans'); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
   const [instOverrides, setInstOverrides] = useState<InstOverride[]>([]);
+  const [yearAssignments, setYearAssignments] = useState<Record<string, string[]>>({});
+  const [assignYear, setAssignYear] = useState<number>(2027);
   const [procOverrides, setProcOverrides] = useState<ProcOverride[]>([]);
   const [auditorProfiles, setAuditorProfiles] = useState<AuditorProfile[]>([]);
   const [security, setSecurity] = useState<SecuritySettings>(DEFAULT_SECURITY);
@@ -347,9 +453,36 @@ export default function App() {
   const effPart1 = useMemo<Record<string, string[]>>(() => {
     const out: Record<string, string[]> = {}; WILAYAT_ORDER.forEach(w => { out[w] = effInstList.filter(e => e.wilayat === w && e.assignments.includes("Part 1")).map(e => e.institution).sort((a, b) => a.localeCompare(b)); }); return out;
   }, [effInstList]);
+  // YEAR-LINKED ASSIGNMENTS: if an institution has a year-specific assignment for the active plan year, use it. Otherwise fall back to permanent assignments.
+  // Example: Saham Hospital 2027 = [General Nursing] only, 2028 = [General Nursing, Labour Rooms]
+  // Shinas LR 2027 = [General Nursing] (no LR plan), 2028 = [Labour Rooms]
   const effComp = useMemo<Record<string, { wilayat: string; institution: string }[]>>(() => {
-    const out: Record<string, { wilayat: string; institution: string }[]> = {}; CATEGORIES.forEach(cat => { out[cat] = effInstList.filter(e => e.assignments.includes(cat)).map(e => ({ wilayat: e.wilayat, institution: e.institution })).sort((a, b) => WILAYAT_ORDER.indexOf(a.wilayat) - WILAYAT_ORDER.indexOf(b.wilayat) || a.institution.localeCompare(b.institution)); }); return out;
-  }, [effInstList]);
+    const year = activeCompPlan?.year;
+    const out: Record<string, { wilayat: string; institution: string }[]> = {};
+    // Which categories have a plan for this year? If LR or RMC has NO plan, its institutions fall back to General Nursing
+    const hasPlanFor = (cat: string) => compPlans.some(p => p.category === cat && String(p.year) === String(year));
+    const getAssign = (e: any): string[] => {
+      if (year) {
+        const key = `${e.wilayat}||${e.institution}||${year}`;
+        if (key in yearAssignments) return yearAssignments[key];
+      }
+      return e.assignments;
+    };
+    CATEGORIES.forEach(cat => {
+      out[cat] = effInstList.filter(e => {
+        const assign = getAssign(e);
+        if (assign.includes(cat)) return true;
+        // Fallback: General Nursing shows LR/RMC institutions when that category has no plan this year
+        if (cat === "General Nursing" && year) {
+          if (assign.includes("Labour Rooms") && !hasPlanFor("Labour Rooms")) return true;
+          if (assign.includes("Renal Medicine Center") && !hasPlanFor("Renal Medicine Center")) return true;
+          // Also if institution is Saham Hospital / Suwaiq Hospital with LR in name but assigned only to General Nursing this year, it already matches above
+        }
+        return false;
+      }).map(e => ({ wilayat: e.wilayat, institution: e.institution })).sort((a, b) => WILAYAT_ORDER.indexOf(a.wilayat) - WILAYAT_ORDER.indexOf(b.wilayat) || a.institution.localeCompare(b.institution));
+    });
+    return out;
+  }, [effInstList, yearAssignments, activeCompPlan?.year, compPlans]);
   const effectiveProcedures = useMemo<string[]>(() => {
     const map = new Map<string, { name: string }>(); PROCEDURES.forEach(p => map.set(p.toLowerCase(), { name: p }));
     procOverrides.forEach(rec => {
@@ -375,12 +508,35 @@ export default function App() {
     let hasData = false;
     const newPlans: Plan[] = []; const newScores: Score[] = []; const newCompPlans: CompPlan[] = []; const newCompScores: CompScore[] = [];
     const newInst: InstOverride[] = []; const newProc: ProcOverride[] = []; const newPwd: PwdOverride[] = []; const newAuditor: AuditorProfile[] = [];
+    const newYearAssign: Record<string, string[]> = {};
     let newSecurity: SecuritySettings | null = null; let newSecId = ""; const newAttempts: LoginAttempt[] = [];
     let sessionCandidate: { username: string; sessionVersion: number } | null = null;
+    const newPlanTombstones: string[] = [];
+    const newCompPlanTombstones: string[] = [];
     rows.forEach(r => {
       const id = r.id || ""; const d = r.data || {};
       try {
         if (id === "audit_current_user" || id.startsWith("audit_session")) { /* IGNORED: login is per-device localStorage, shared row must never overwrite this device's login. */ return; }
+        if (id.startsWith("audit_tombstones_")) {
+          // Tombstone row: data = { kind: 'plan'|'compPlan', key: 'Topic||Year' }
+          const kind = d.kind; const key = d.key;
+          if (kind === "plan" && key) newPlanTombstones.push(key);
+          else if (kind === "compPlan" && key) newCompPlanTombstones.push(key);
+          else if (id.includes("_plan_") && d.key) newPlanTombstones.push(d.key);
+          else if (id.includes("_compPlan_") && d.key) newCompPlanTombstones.push(d.key);
+          hasData = true;
+          return;
+        }
+        // YEAR-LINKED ASSIGNMENTS: id = audit_institution_assignments_<wilayat>_<institution>_<year>, data = { wilayat, institution, year, assignments }
+        if (id.includes("institution_assignments_")) {
+          const wil = d.wilayat; const inst = d.institution; const yr = d.year;
+          if (wil && inst && yr) {
+            const key = `${wil}||${inst}||${yr}`;
+            newYearAssign[key] = Array.isArray(d.assignments) ? d.assignments : [];
+          }
+          hasData = true;
+          return;
+        }
         // Aggregate rows: one row whose data is the whole collection.
         if ((id === "audit_scores" || id === "audit_plans" || id === "audit_institutions" || id === "audit_procedures" || id === "audit_users") && Array.isArray(d)) {
           hasData = true;
@@ -427,11 +583,42 @@ export default function App() {
       arr.forEach((v) => m.set(key(v), v));
       return [...m.values()];
     };
-    // V4: dedup plans with Active = OR. Supabase holds old + new rows for same topic.
-    // If any copy is Active, keep Active. Never let an old inactive copy turn it off.
-    const dedupedPlans = (() => { const m = new Map<string, any>(); newPlans.forEach(v => { const k = `${v.topic}||${v.year}`; const e = m.get(k); m.set(k, e ? { ...v, active: !!(e.active || v.active) } : v); }); return [...m.values()]; })();
+    // FIXED V7: dedup plans by newest updated_at (sortedRows is oldest->newest), keep last value.
+    // Do NOT OR active - intentional deactivation must stick. Newest row wins.
+    // Merge persistent tombstones from this batch into state + localStorage
+    if (newPlanTombstones.length) {
+      setPlanTombstones(prev => {
+        const merged = [...new Set([...prev, ...newPlanTombstones])];
+        try { localStorage.setItem('audit_tombstones_plans', JSON.stringify(merged)); } catch {}
+        return merged;
+      });
+    }
+    if (newCompPlanTombstones.length) {
+      setCompPlanTombstones(prev => {
+        const merged = [...new Set([...prev, ...newCompPlanTombstones])];
+        try { localStorage.setItem('audit_tombstones_compPlans', JSON.stringify(merged)); } catch {}
+        return merged;
+      });
+    }
+    // Clean old in-memory tombstones
+    const nowDelCheck = Date.now();
+    for (const [k, ts] of recentlyDeletedRef.current.entries()) { if (nowDelCheck - ts > 60000) recentlyDeletedRef.current.delete(k); }
+    const isRecentlyDeleted = (id: string, logicalKey: string) => {
+      return recentlyDeletedRef.current.has(id) || recentlyDeletedRef.current.has(logicalKey);
+    };
+    const allPlanTombstones = [...new Set([...planTombstones, ...newPlanTombstones])];
+    const allCompPlanTombstones = [...new Set([...compPlanTombstones, ...newCompPlanTombstones])];
+    const dedupedPlansRaw = (() => { const m = new Map<string, any>(); newPlans.forEach(v => { const k = `${v.topic}||${v.year}`; m.set(k, v); }); return [...m.values()]; })();
+    const dedupedCompPlansRaw = (() => { const m = new Map<string, any>(); newCompPlans.forEach(v => { const k = `${v.category}||${v.year}`; m.set(k, v); }); return [...m.values()]; })();
+    const dedupedPlans = dedupedPlansRaw.filter((v: any) => {
+      const key = `${v.topic}||${v.year}`;
+      return !isRecentlyDeleted(v.id, key) && !allPlanTombstones.includes(key);
+    });
+    const dedupedCompPlans = dedupedCompPlansRaw.filter((v: any) => {
+      const key = `${v.category}||${v.year}`;
+      return !isRecentlyDeleted(v.id, key) && !allCompPlanTombstones.includes(key);
+    });
     const dedupedScores = dedupBy(newScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
-    const dedupedCompPlans = (() => { const m = new Map<string, any>(); newCompPlans.forEach(v => { const k = `${v.category}||${v.year}`; const e = m.get(k); m.set(k, e ? { ...v, active: !!(e.active || v.active) } : v); }); return [...m.values()]; })();
     const dedupedCompScores = dedupBy(newCompScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
     // MERGE, never replace: a fetch that runs seconds after a save may not yet
     // include that just-saved row. Replacing would wipe it from the screen.
@@ -441,10 +628,11 @@ export default function App() {
     // planId). So merge scores by wilayat||institution||period||topic, ignoring
     // planId, and keep the local plan id. Never let a plan copy hide a score.
     if (dedupedScores.length) setScores(prev => { const m = new Map(prev.map(x => [`${x.wilayat}||${x.institution}||${x.period}||${x.topic || ''}`, x])); dedupedScores.forEach(x => { const k = `${x.wilayat}||${x.institution}||${x.period}||${x.topic || ''}`; const existing = m.get(k); m.set(k, existing ? { ...x, planId: existing.planId, id: existing.id } : x); }); return [...m.values()]; });
-    if (dedupedPlans.length) setPlans(prev => { const m = new Map(prev.map(x => [`${x.topic}||${x.year}`, x])); dedupedPlans.forEach(x => { const k = `${x.topic}||${x.year}`; const existing = m.get(k); m.set(k, existing ? { ...x, id: existing.id, active: !!(existing.active || x.active) } : x); }); return [...m.values()]; });
-    if (dedupedCompPlans.length) setCompPlans(prev => { const m = new Map(prev.map(x => [`${x.category}||${x.year}`, x])); dedupedCompPlans.forEach(x => { const k = `${x.category}||${x.year}`; const existing = m.get(k); m.set(k, existing ? { ...x, id: existing.id, active: !!(existing.active || x.active) } : x); }); return [...m.values()]; });
+    if (dedupedPlans.length) setPlans(prev => { const m = new Map(prev.map(x => [`${x.topic}||${x.year}`, x])); dedupedPlans.forEach(x => { const k = `${x.topic}||${x.year}`; const existing = m.get(k); if (existing) { /* Supabase wins, but keep local id for score linkage */ m.set(k, { ...x, id: existing.id }); } else { m.set(k, x); } }); return [...m.values()]; });
+    if (dedupedCompPlans.length) setCompPlans(prev => { const m = new Map(prev.map(x => [`${x.category}||${x.year}`, x])); dedupedCompPlans.forEach(x => { const k = `${x.category}||${x.year}`; const existing = m.get(k); if (existing) { m.set(k, { ...x, id: existing.id }); } else { m.set(k, x); } }); return [...m.values()]; });
     if (dedupedCompScores.length) setCompScores(prev => { const m = new Map(prev.map(x => [`${x.wilayat}||${x.institution}||${x.period}||${x.category || ''}`, x])); dedupedCompScores.forEach(x => { const k = `${x.wilayat}||${x.institution}||${x.period}||${x.category || ''}`; const existing = m.get(k); m.set(k, existing ? { ...x, planId: existing.planId, id: existing.id } : x); }); return [...m.values()]; });
     if (newInst.length) setInstOverrides(newInst);
+    if (Object.keys(newYearAssignments).length) setYearAssignments(prev => ({ ...prev, ...newYearAssignments }));
     if (newProc.length) setProcOverrides(newProc);
     if (newPwd.length) setOverrides(newPwd);
     if (newAuditor.length) setAuditorProfiles(newAuditor);
@@ -517,6 +705,7 @@ export default function App() {
   // in-progress edit is not overwritten by incoming data.
   const reloadRef = React.useRef(reloadRecords);
   const lastSaveAtRef = React.useRef(0);
+  const recentlyDeletedRef = React.useRef<Map<string, number>>(new Map()); // id -> timestamp, blocks re-add for 60s
   useEffect(() => { reloadRef.current = reloadRecords; });
   useEffect(() => {
     if (!user) return;
@@ -545,6 +734,12 @@ export default function App() {
     return forTopic.find(p => p.active) || forTopic[0];
   }, [plans, topic, planId]);
   useEffect(() => { if (activePlan && planId !== activePlan.id) setPlanId(activePlan.id); }, [activePlan]);
+  // Persistent tombstone filter: remove any plan whose key is in tombstones (survives logout/login)
+  useEffect(() => {
+    if (planTombstones.length === 0 && compPlanTombstones.length === 0) return;
+    setPlans(prev => prev.filter(p => !planTombstones.includes(`${p.topic}||${p.year}`)));
+    setCompPlans(prev => prev.filter(p => !compPlanTombstones.includes(`${p.category}||${p.year}`)));
+  }, [planTombstones, compPlanTombstones]);
   // 3 - Entering Plans page = fresh editor: clear any previously selected procedures/feedback
   // (so an old plan's O2 therapy etc. does not stay in the form)
   const prevTabRef = (globalThis as any).__prevTabRef || ((globalThis as any).__prevTabRef = { current: "" });
@@ -758,7 +953,7 @@ export default function App() {
         simple.push([v.wilayat, labelFor(v.wilayat, v.institution), category, String(count), ...scoreCells, ...commentCells, ...auditorCells, ...muscatCells, ...isoCells]);
       });
       const csv = simple.map(r => r.map(c => `"${String(c).replaceAll('"', '""')}"`).join(",")).join("\n");
-      const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `competency-${activeCompPlan.category}-${activeCompPlan.year}.csv`; a.click(); URL.revokeObjectURL(url); return;
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.style.display = "none"; a.href = url; a.download = `competency-${activeCompPlan.category}-${activeCompPlan.year}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, 2000); return;
     }
     if (!activePlan) return;
     const rowsHeader = ["Wilayat", "Institution", "Number of Audits", "Average (%)", ...activePlan.periods.map(p => `${p} Score`), ...activePlan.periods.map(p => `${p} Comment`), ...activePlan.periods.map(p => `${p} Audited by`), ...activePlan.periods.map(p => `${p} Added at Muscat DD-MM-YYYY HH:mm`), ...activePlan.periods.map(p => `${p} Added at ISO`)];
@@ -769,7 +964,7 @@ export default function App() {
       rows.push([v.wilayat, labelFor(v.wilayat, v.institution), String(cells.filter(Boolean).length), nums.length ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2) : "", ...cells.map(c => c ? c.score : ""), ...cells.map(c => c ? c.comment : ""), ...cells.map(c => c?.auditorName || ""), ...cells.map(c => c?.auditedAt ? formatMuscat(c.auditedAt) : ""), ...cells.map(c => c?.auditedAt || ""),]);
     });
     const csv = rows.map(r => r.map(c => `"${String(c).replaceAll('"', '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `audit-${activePlan.topic}-${activePlan.year}.csv`; a.click(); URL.revokeObjectURL(url);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.style.display = "none"; a.href = url; a.download = `audit-${activePlan.topic}-${activePlan.year}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, 2000);
   }
 
   function exportPart1StatsExcel() {
@@ -833,8 +1028,40 @@ export default function App() {
   // 9 - Master/Admin can activate / deactivate plans. Deactivated = Wilayat sees scores but cannot edit.
   async function deletePart1Plan(plan: Plan) {
     if (!window.confirm(`Delete Part 1 plan ${plan.topic} · ${plan.year}? Its scores will also be deleted.`)) return;
-    setPlans(prev => prev.filter(x => x.id !== plan.id));
-    setScores(prev => prev.filter(s => s.planId !== plan.id && !(s.topic === plan.topic && s.year === plan.year)));
+    lastSaveAtRef.current = Date.now();
+    const delKey = `${plan.topic}||${plan.year}`;
+    // Persistent tombstone - survives logout/login
+    setPlanTombstones(prev => {
+      if (prev.includes(delKey)) return prev;
+      const next = [...prev, delKey];
+      try { localStorage.setItem('audit_tombstones_plans', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    recentlyDeletedRef.current.set(plan.id, Date.now());
+    recentlyDeletedRef.current.set(delKey, Date.now());
+    // Remove from local state immediately (all matching keys, not just id)
+    setPlans(prev => prev.filter(x => `${x.topic}||${x.year}` !== delKey));
+    setScores(prev => prev.filter(s => !(s.topic === plan.topic && s.year === plan.year) && s.planId !== plan.id));
+    // Save tombstone to Supabase so other devices and future logins respect it
+    try {
+      const tombId = `audit_tombstones_plan_${plan.topic.replace(/\s+/g,'_')}_${plan.year}`;
+      await sbSave(tombId, { kind: "plan", key: delKey, topic: plan.topic, year: plan.year, deletedAt: new Date().toISOString() });
+    } catch {}
+    // Delete ALL matching plan rows from Supabase (covers duplicates with different ids)
+    try {
+      const all = await sbLoadAll();
+      if (all.ok) {
+        for (const r of all.rows) {
+          const id = r.id || ""; const d = r.data || {};
+          if (id.startsWith("audit_plans_") && d.topic === plan.topic && d.year === plan.year) {
+            try { await supabaseDelete(id); } catch {}
+          }
+          if (id.startsWith("audit_scores_") && d.topic === plan.topic && d.year === plan.year) {
+            try { await supabaseDelete(id); } catch {}
+          }
+        }
+      }
+    } catch {}
     try { await supabaseDelete(`audit_plans_${plan.id}`); } catch {}
     try { await api("records.delete", { collection: "audit_plans", id: plan.id }); } catch {}
     const stale = scores.filter(s => s.planId === plan.id || (s.topic === plan.topic && s.year === plan.year));
@@ -843,8 +1070,36 @@ export default function App() {
   }
   async function deleteCompPlan(plan: CompPlan) {
     if (!window.confirm(`Delete Part 2 plan ${plan.category} · ${plan.year}? Its scores will also be deleted.`)) return;
-    setCompPlans(prev => prev.filter(x => x.id !== plan.id));
-    setCompScores(prev => prev.filter(s => s.planId !== plan.id && !(s.category === plan.category && s.year === plan.year)));
+    lastSaveAtRef.current = Date.now();
+    const delKey = `${plan.category}||${plan.year}`;
+    setCompPlanTombstones(prev => {
+      if (prev.includes(delKey)) return prev;
+      const next = [...prev, delKey];
+      try { localStorage.setItem('audit_tombstones_compPlans', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    recentlyDeletedRef.current.set(plan.id, Date.now());
+    recentlyDeletedRef.current.set(delKey, Date.now());
+    setCompPlans(prev => prev.filter(x => `${x.category}||${x.year}` !== delKey));
+    setCompScores(prev => prev.filter(s => !(s.category === plan.category && s.year === plan.year) && s.planId !== plan.id));
+    try {
+      const tombId = `audit_tombstones_compPlan_${plan.category.replace(/\s+/g,'_')}_${plan.year}`;
+      await sbSave(tombId, { kind: "compPlan", key: delKey, category: plan.category, year: plan.year, deletedAt: new Date().toISOString() });
+    } catch {}
+    try {
+      const all = await sbLoadAll();
+      if (all.ok) {
+        for (const r of all.rows) {
+          const id = r.id || ""; const d = r.data || {};
+          if ((id.startsWith("competency_plans_") || id.startsWith("audit_plans_")) && d.category === plan.category && d.year === plan.year) {
+            try { await supabaseDelete(id); } catch {}
+          }
+          if (id.startsWith("competency_scores_") && d.category === plan.category && d.year === plan.year) {
+            try { await supabaseDelete(id); } catch {}
+          }
+        }
+      }
+    } catch {}
     try { await supabaseDelete(`competency_plans_${plan.id}`); } catch {}
     try { await api("records.delete", { collection: "competency_plans", id: plan.id }); } catch {}
     const stale = compScores.filter(s => s.planId === plan.id || (s.category === plan.category && s.year === plan.year));
@@ -852,14 +1107,40 @@ export default function App() {
     if (editingCompPlanId === plan.id) { setEditingCompPlanId(null); setCompProcSearch(Array(12).fill(undefined as any)); setOpenProcIdx(null); }
     setLiveToast(`Part 2 plan ${plan.category} · ${plan.year} deleted.`);
   }
+  async function restoreAllDeletedPlans() {
+    if (!window.confirm(`Restore all deleted plans? This will clear tombstones and bring back default plans on next refresh.`)) return;
+    lastSaveAtRef.current = Date.now();
+    // Clear local state
+    setPlanTombstones([]);
+    setCompPlanTombstones([]);
+    try { localStorage.removeItem('audit_tombstones_plans'); } catch {}
+    try { localStorage.removeItem('audit_tombstones_compPlans'); } catch {}
+    // Delete tombstone rows from Supabase
+    try {
+      const all = await sbLoadAll();
+      if (all.ok) {
+        for (const r of all.rows) {
+          if ((r.id || "").startsWith("audit_tombstones_")) {
+            try { await supabaseDelete(r.id); } catch {}
+          }
+        }
+      }
+    } catch {}
+    // Restore defaults immediately
+    setPlans(DEFAULT_PLANS);
+    setCompPlans(DEFAULT_COMP_PLANS);
+    setLiveToast(`Deleted plans restored — defaults back. Refresh to reload from Supabase.`);
+  }
   async function togglePart1PlanActive(plan: Plan) {
     const next = !plan.active;
+    lastSaveAtRef.current = Date.now();
     setPlans(prev => prev.map(x => x.id === plan.id ? { ...x, active: next } : x));
     try { await syncSaveFirst(`audit_plans_${plan.id}`, { id: plan.id, topic: plan.topic, year: plan.year, frequency: plan.frequency, periods: plan.periods, active: next }); } catch {}
     setLiveToast(next ? `${plan.topic} · ${plan.year} activated.` : `${plan.topic} · ${plan.year} deactivated — Wilayat view only.`);
   }
   async function toggleCompPlanActive(plan: CompPlan) {
     const next = !plan.active;
+    lastSaveAtRef.current = Date.now();
     setCompPlans(prev => prev.map(x => x.id === plan.id ? { ...x, active: next } : x));
     try { await syncSaveFirst(`competency_plans_${plan.id}`, { id: plan.id, category: plan.category, year: plan.year, frequency: plan.frequency, periods: plan.periods, procedures: plan.procedures, feedback: plan.feedback, active: next }); } catch {}
     setLiveToast(next ? `${plan.category} · ${plan.year} activated.` : `${plan.category} · ${plan.year} deactivated — Wilayat view only.`);
@@ -867,10 +1148,8 @@ export default function App() {
   // 5 - Export Competency plan to Word (.doc) — last accepted format:
   // A4 landscape matrix (Serial / Planned Procedures / Jan-Dec) with MOH logo centred,
   // green #c9ead9 highlight in the months where the procedure is planned.
-  function exportCompPlanWord() {
+  async function exportCompPlanWord() {
     if (!activeCompPlan) return;
-    // Rows: one per distinct procedure (in order of first appearance),
-    // then Obtaining Feedback, then Skipped — each row greens its own months.
     const seen: string[] = []; const rowMonths: number[][] = [];
     activeCompPlan.periods.forEach((_, i) => {
       if (activeCompPlan.feedback?.[i]) return; const proc = activeCompPlan.procedures?.[i]; if (!proc) return;
@@ -880,18 +1159,70 @@ export default function App() {
     activeCompPlan.periods.forEach((_, i) => { if (activeCompPlan.feedback?.[i]) fbMonths.push(i); else if (!activeCompPlan.procedures?.[i]) skipMonths.push(i); });
     if (fbMonths.length) { seen.push("Obtaining Feedback"); rowMonths.push(fbMonths); }
     if (skipMonths.length) { seen.push("— Skipped —"); rowMonths.push(skipMonths); }
-    const rows = seen.map((proc, r) => {
+
+    // HTML version for desktop (old working version with logo)
+    const rowsHtml = seen.map((proc, r) => {
       const isFbRow = proc === "Obtaining Feedback";
       const isSkipRow = proc === "— Skipped —";
-      // Feedback + Skipped: procedure column stays EMPTY (never "(Removed procedure)" — that was displayProcedure() being run on the label),
-      // and each month cell is filled with the text "Obtaining feedback" / "Skipped".
       const procCell = (isFbRow || isSkipRow) ? "" : xmlEscape(displayProcedure(proc) || proc);
       const monthCells = activeCompPlan.periods.map((_, i) => rowMonths[r].includes(i) ? `<td style="background:#c9ead9;">${isFbRow ? "Obtaining feedback" : isSkipRow ? "Skipped" : "&nbsp;"}</td>` : `<td>&nbsp;</td>`).join("");
       return `<tr><td style="text-align:center;">${r + 1}</td><td style="text-align:left;">${procCell}</td>${monthCells}</tr>`;
     }).join("");
-    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</title><style>@page WordSection1{size:29.7cm 21cm;mso-page-orientation:landscape;margin:1cm 1cm 1cm 1cm;} div.WordSection1{page:WordSection1;} body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#102a2c;} p{margin:4pt 0;} table{border-collapse:collapse;width:100%;font-size:9pt;} th,td{border:1pt solid #7a8a88;padding:4pt 5pt;text-align:center;vertical-align:middle;} th{background:#0d6e6b;color:#ffffff;font-weight:bold;} thead{display:table-header-group;} tr{page-break-inside:avoid;}</style></head><body><div class="WordSection1"><div style="text-align:center;"><p style="text-align:center;margin:0 0 6pt;"><img src="${MOH_LOGO_DATA_URL}" alt="Ministry of Health logo" style="height:72px;width:auto;" /></p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Directorate General of Health Services - NBG</p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Nursing Service Department</p><p style="font-size:15pt;font-weight:bold;margin:4pt 0 10pt;">${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</p></div><table><thead><tr><th style="width:5%;">Serial Number</th><th style="width:22%;text-align:left;">Planned Procedures</th>${activeCompPlan.periods.map(m => `<th style="width:6.5%;">${m}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></body></html>`;
-    const blob = new Blob(["\ufeff" + html], { type: "application/msword" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${activeCompPlan.category.replace(/\s+/g, "_")}_Competency_Procedures_plan_${activeCompPlan.year}.doc`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</title><style>@page WordSection1{size:29.7cm 21cm;mso-page-orientation:landscape;margin:1cm 1cm 1cm 1cm;} div.WordSection1{page:WordSection1;} body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#102a2c;} p{margin:4pt 0;} table{border-collapse:collapse;width:100%;font-size:9pt;} th,td{border:1pt solid #7a8a88;padding:4pt 5pt;text-align:center;vertical-align:middle;} th{background:#0d6e6b;color:#ffffff;font-weight:bold;} thead{display:table-header-group;} tr{page-break-inside:avoid;}</style></head><body><div class="WordSection1"><div style="text-align:center;"><p style="text-align:center;margin:0 0 6pt;"><img src="${MOH_LOGO_DATA_URL}" alt="Ministry of Health logo" style="height:72px;width:auto;" /></p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Directorate General of Health Services - NBG</p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Nursing Service Department</p><p style="font-size:15pt;font-weight:bold;margin:4pt 0 10pt;">${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</p></div><table><thead><tr><th style="width:5%;">Serial Number</th><th style="width:22%;text-align:left;">Planned Procedures</th>${activeCompPlan.periods.map(m => `<th style="width:6.5%;">${m}</th>`).join("")}</tr></thead><tbody>${rowsHtml}</tbody></table></div></body></html>`;
+
+    const fileNameDoc = `${activeCompPlan.category.replace(/\s+/g, "_")}_Competency_Procedures_plan_${activeCompPlan.year}.doc`;
+    const fileNameDocx = `${activeCompPlan.category.replace(/\s+/g, "_")}_Competency_Procedures_plan_${activeCompPlan.year}.docx`;
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
+
+    if (isIOS) {
+      try {
+        const zipBytes = buildDocxBytes(activeCompPlan.category, activeCompPlan.year, seen, rowMonths, activeCompPlan.periods, MOH_LOGO_DATA_URL);
+        const zipCopy: Uint8Array<ArrayBuffer> = new Uint8Array(zipBytes);
+        const blobDocx = new Blob([zipCopy.buffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+        const fileDocx = new File([blobDocx], fileNameDocx, { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+        const nav: any = navigator as any;
+        if (nav.canShare && nav.canShare({ files: [fileDocx] }) && nav.share) {
+          await nav.share({ files: [fileDocx], title: fileNameDocx, text: fileNameDocx });
+          return;
+        }
+        const urlDocx = URL.createObjectURL(blobDocx);
+        const a = document.createElement("a");
+        a.style.display = "none";
+        a.href = urlDocx;
+        (a as any).download = fileNameDocx;
+        a.setAttribute("download", fileNameDocx);
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(urlDocx); }, 6000);
+        return;
+      } catch (e) {
+        console.log("iOS docx failed, fallback to html view", e);
+        try {
+          const viewBlob = new Blob(["\ufeff" + html], { type: "text/html;charset=utf-8" });
+          const viewUrl = URL.createObjectURL(viewBlob);
+          window.open(viewUrl, "_blank");
+          setTimeout(() => URL.revokeObjectURL(viewUrl), 8000);
+          return;
+        } catch {}
+      }
+    }
+
+    // Desktop — restore old working .doc with logo (you said "at least desktop version like before")
+    try {
+      const blob = new Blob(["\ufeff" + html], { type: "application/msword;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.style.display = "none";
+      a.href = url;
+      (a as any).download = fileNameDoc;
+      a.setAttribute("download", fileNameDoc);
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, 2500);
+    } catch (e: any) {
+      console.log("desktop doc build failed", e);
+      alert("Could not build Word file: " + (e?.message || e));
+    }
   }
   async function createPlan(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);
@@ -899,7 +1230,22 @@ export default function App() {
       const value = { topic: newPlan.topic, year: newPlan.year, frequency: "Monthly", periods: [...MONTHS], active: true };
       const newId = `plan-${Date.now()}`;
       const newP: Plan = { id: newId, ...value };
+      const key = `${value.topic}||${value.year}`;
+      // If this key was previously deleted, clear its tombstone so it doesn't re-delete on refresh
+      setPlanTombstones(prev => {
+        if (!prev.includes(key)) return prev;
+        const next = prev.filter(k => k !== key);
+        try { localStorage.setItem('audit_tombstones_plans', JSON.stringify(next)); } catch {}
+        return next;
+      });
+      recentlyDeletedRef.current.delete(newId);
+      recentlyDeletedRef.current.delete(key);
+      try {
+        const tombId = `audit_tombstones_plan_${value.topic.replace(/\s+/g,'_')}_${value.year}`;
+        await supabaseDelete(tombId);
+      } catch {}
       setPlans(prev => [...prev.filter(p => !(p.topic === value.topic && p.year === value.year)), newP]);
+      lastSaveAtRef.current = Date.now();
       await syncSaveFirst(`audit_plans_${newId}`, { id: newId, ...value });
       try { await api("records.create", { collection: "audit_plans", value, idempotency_key: `plan-${newPlan.topic}-${newPlan.year}-${Date.now()}` }); } catch {}
       setLiveToast("Plan created and set as active."); setTopic(newPlan.topic);
@@ -913,8 +1259,24 @@ export default function App() {
       const editing = !!editingCompPlanId;
       const newId = editing ? editingCompPlanId : `compplan-${Date.now()}`;
       const newP: CompPlan = { id: newId, ...value };
+      const key = `${value.category}||${value.year}`;
+      if (!editing) {
+        setCompPlanTombstones(prev => {
+          if (!prev.includes(key)) return prev;
+          const next = prev.filter(k => k !== key);
+          try { localStorage.setItem('audit_tombstones_compPlans', JSON.stringify(next)); } catch {}
+          return next;
+        });
+        recentlyDeletedRef.current.delete(newId);
+        recentlyDeletedRef.current.delete(key);
+        try {
+          const tombId = `audit_tombstones_compPlan_${value.category.replace(/\s+/g,'_')}_${value.year}`;
+          await supabaseDelete(tombId);
+        } catch {}
+      }
       if (editing) setCompPlans(prev => prev.map(p => p.id === newId ? newP : p));
       else setCompPlans(prev => [...prev.filter(p => !(p.category === value.category && p.year === value.year)), newP]);
+      lastSaveAtRef.current = Date.now();
       await syncSaveFirst(`competency_plans_${newId}`, { id: newId, ...value });
       try { if (editing) await api("records.replace", { collection: "competency_plans", id: newId, value }); else await api("records.create", { collection: "competency_plans", value, idempotency_key: `compplan-${newCompPlan.category}-${newCompPlan.year}-${Date.now()}` }); } catch {}
       if (editing) {
@@ -968,7 +1330,30 @@ export default function App() {
       const val = { kind: editingInst ? "edit" : "add", wilayat: instForm.wilayat, name: cleanName, assignments: instForm.assignments, originalWilayat: editingInst?.wilayat, originalName: editingInst?.institution };
       if (editingInst) setInstOverrides(prev => prev.map(x => x.id === newId ? { ...x, ...val, id: newId } as InstOverride : x)); else setInstOverrides(prev => [...prev, { id: newId, ...val } as InstOverride]);
       await syncSaveFirst(`audit_institutions_${newId}`, { id: newId, ...val });
-      setInstMsg(`Institution "${cleanName}" saved.`); setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"] });
+      // Per-year assignment: link category to plan year
+      const key = `${instForm.wilayat}||${cleanName.toLowerCase()}`;
+      const year = String(instForm.year || "2027");
+      setYearAssignments(prev => ({ ...prev, [`${instForm.wilayat}||${cleanName}||${year}`]: [...instForm.assignments] }));
+      const assignId = `audit_institution_assignments_${instForm.wilayat.replace(/\s+/g,'_')}_${cleanName.replace(/\s+/g,'_')}_${year}`;
+      await syncSaveFirst(assignId, { id: assignId, wilayat: instForm.wilayat, institution: cleanName, year, assignments: instForm.assignments });
+      setInstMsg(`Institution "${cleanName}" saved for ${year} — assignments linked to ${year} plan.`); setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"], year: instForm.year });
+    } catch (err: any) { setInstMsg(`Could not save: ${err.message}`); }
+    setBusy(false);
+  }
+
+  // Save only assignments for a year without changing name/wilayat — used for quick re-assign
+  async function saveInstYearAssignmentOnly() {
+    if (!editingInst && !instForm.name) { setInstMsg("Select an institution to assign."); return; }
+    const cleanName = cleanInstitutionName(instForm.name, instForm.wilayat);
+    if (!cleanName) { setInstMsg("Enter an institution name."); return; }
+    setBusy(true);
+    try {
+      const key = `${instForm.wilayat}||${cleanName.toLowerCase()}`;
+      const year = String(instForm.year || "2027");
+      setYearAssignments(prev => ({ ...prev, [`${instForm.wilayat}||${cleanName}||${year}`]: [...instForm.assignments] }));
+      const assignId = `audit_institution_assignments_${instForm.wilayat.replace(/\s+/g,'_')}_${cleanName.replace(/\s+/g,'_')}_${year}`;
+      await syncSaveFirst(assignId, { id: assignId, wilayat: instForm.wilayat, institution: cleanName, year, assignments: instForm.assignments });
+      setInstMsg(`Assignments for ${cleanName} saved for ${year}.`);
     } catch (err: any) { setInstMsg(`Could not save: ${err.message}`); }
     setBusy(false);
   }
@@ -986,6 +1371,48 @@ export default function App() {
       await syncSaveFirst(`audit_procedures_${newId}`, { id: newId, ...val });
       setProcMsg(`Procedure "${finalName}" saved.`); setEditingProc(null); setProcForm({ name: "", tag: "General" });
     } catch (err: any) { setProcMsg(`Could not save: ${err.message}`); }
+    setBusy(false);
+  }
+
+  async function deleteInstitution(inst: EffInst) {
+    if (!window.confirm(`Delete institution "${inst.institution}" in ${inst.wilayat}? This will hide it from Audit Grid and Plans.`)) return;
+    setBusy(true);
+    try {
+      const newId = inst.sourceId || `inst-del-${Date.now()}`;
+      const val: InstOverride = { id: newId, kind: "delete", wilayat: inst.wilayat, name: inst.institution, assignments: [], originalWilayat: inst.wilayat, originalName: inst.institution };
+      // Add tombstone so merge logic removes it immediately
+      setInstOverrides(prev => {
+        // Remove any previous add/edit for same key, then add delete
+        const filtered = prev.filter(x => !(x.originalName === inst.institution && (x.originalWilayat || x.wilayat) === inst.wilayat) && !(x.name === inst.institution && x.wilayat === inst.wilayat));
+        return [...filtered, val];
+      });
+      lastSaveAtRef.current = Date.now();
+      await syncSaveFirst(`audit_institutions_${newId}`, { id: newId, ...val });
+      setInstMsg(`Institution "${inst.institution}" deleted.`);
+      if (editingInst && editingInst.wilayat === inst.wilayat && editingInst.institution === inst.institution) {
+        setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"] });
+      }
+    } catch (err: any) { setInstMsg(`Could not delete: ${err.message}`); }
+    setBusy(false);
+  }
+
+  async function deleteProcedure(procName: string) {
+    if (!window.confirm(`Delete procedure "${procName}"? It will be removed from dropdowns and shown as "(Removed procedure)" in old plans.`)) return;
+    setBusy(true);
+    try {
+      const newId = `proc-del-${Date.now()}`;
+      const val: ProcOverride = { id: newId, kind: "delete", name: procName, originalName: procName };
+      setProcOverrides(prev => {
+        const filtered = prev.filter(x => x.name !== procName && x.originalName !== procName);
+        return [...filtered, val];
+      });
+      lastSaveAtRef.current = Date.now();
+      await syncSaveFirst(`audit_procedures_${newId}`, { id: newId, ...val });
+      setProcMsg(`Procedure "${procName}" deleted.`);
+      if (editingProc && editingProc.name === procName) {
+        setEditingProc(null); setProcForm({ name: "", tag: "General" });
+      }
+    } catch (err: any) { setProcMsg(`Could not delete: ${err.message}`); }
     setBusy(false);
   }
 
@@ -1086,9 +1513,9 @@ export default function App() {
               </div>
               <div className="p-5 sm:p-7">
                 <h2 className="text-xl font-extrabold">Sign in</h2><p className="text-sm text-[var(--muted)]">Choose account and type password.</p>
-                <form onSubmit={login} className="mt-4 space-y-3" autoComplete="off">
-                  <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} name="nbg_username_7x9" /></label>
-                  <label className="block text-sm font-bold">Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} className="mt-1 w-full" autoComplete="new-password" autoCorrect="off" autoCapitalize="off" spellCheck={false} name="nbg_password_7x9" data-lpignore="true" /></label>
+                <form onSubmit={login} className="mt-4 space-y-3">
+                  <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="username" /></label>
+                  <label className="block text-sm font-bold">Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} className="mt-1 w-full" autoComplete="current-password" /></label>
                   {security.locked && <label className="block text-sm font-bold">Recovery Code <span className="text-red-600">* Required for Master Unlock</span><input type="password" value={recoveryInput} onChange={e => setRecoveryInput(e.target.value)} className="mt-1 w-full" placeholder="Recovery Code set by Master" autoComplete="off" /></label>}
                   {security.accessCodeEnabled && <label className="block text-sm font-bold">Directorate Access Code <span className="text-red-600">* Required</span><input type="password" value={accessCodeInput} onChange={e => setAccessCodeInput(e.target.value)} className="mt-1 w-full" placeholder="Directorate Access Code" autoComplete="off" /></label>}
                   {loginError && <p className="rounded-lg bg-[var(--red)] p-2 text-sm font-semibold">{loginError}</p>}
@@ -1116,17 +1543,29 @@ export default function App() {
               <section>
                 <h2 className="text-xl font-black">Control Panel</h2>
                 <p className="mt-1 text-sm text-[var(--muted)]">Same panel in Part 1 and Part 2. Passwords, institutions, and procedures are saved in the shared database (audit_data) and apply immediately. {dbLabel}</p>
-                <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                  <div className="card p-4"><h3 className="flex items-center gap-2 font-extrabold"><Users size={18} /> Accounts</h3><div className="mt-3 space-y-2">{effectiveUsers.map(u => <div key={u.username} className="flex justify-between gap-2 rounded-lg border p-3 text-sm"><span><strong>{u.label}</strong> — {u.username} · {u.role} · {u.wilayat}</span><span className="text-[var(--muted)]">Password: {u.password}</span></div>)}</div></div>
-                  <form onSubmit={changePassword} className="card p-4"><h3 className="font-extrabold">Change a password</h3><label className="mt-3 block text-sm font-bold">Account<select value={pwdForm.username} onChange={e => setPwdForm({ ...pwdForm, username: e.target.value })} className="mt-1 w-full">{effectiveUsers.filter(u => isMaster || u.username !== "master").map(u => <option key={u.username} value={u.username}>{u.label} ({u.username}) — {u.role}</option>)}</select></label><label className="mt-3 block text-sm font-bold">New password<div className="mt-1 flex gap-2"><input type={showPwd ? "text" : "password"} value={pwdForm.password} onChange={e => setPwdForm({ ...pwdForm, password: e.target.value })} className="flex-1" placeholder="At least 4 characters" /><button type="button" onClick={() => setShowPwd(!showPwd)} className="rounded-lg border px-3 text-sm font-bold" aria-label={showPwd ? "Hide password" : "Show password"}>{showPwd ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><label className="mt-3 block text-sm font-bold">Confirm new password<input type={showPwd ? "text" : "password"} value={pwdConfirm} onChange={e => setPwdConfirm(e.target.value)} className="mt-1 w-full" placeholder="Re-enter new password" /></label>{pwdMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{pwdMsg}</p>}<button disabled={busy} className="mt-4 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Update password</button></form>
+                <div className="mt-4 card p-4"><h3 className="font-extrabold">Assignments by Year — Link Category to Year Plan</h3><p className="mt-1 text-sm text-[var(--muted)]">Assignments are variable by Year, not permanent. If there is No Plan for Labour Rooms / Renal Medicine Center in a year, assign those institutions to General Nursing for that year. Example: Saham Hospital & Suwaiq Hospital — 2027 General Nursing only, 2028 General + Labour Rooms. Shinas LR can move between General Nursing and Labour Rooms by year.</p>
+                  <div className="mt-3 flex flex-wrap gap-3 items-end"><label className="text-sm font-bold">Year<select value={assignYear} onChange={e => setAssignYear(Number(e.target.value))} className="mt-1 w-32">{[2027,2028,2029,2030,2031,2032,2033,2034,2035,2036,2037,2038,2039,2040].map(y => <option key={y} value={y}>{y}</option>)}</select></label><span className="text-xs text-[var(--muted)]">Showing assignments for {assignYear}. Tick = institution will appear in that Category grid for {assignYear} plan. Empty = uses permanent assignment.</span></div>
+                  <div className="mt-3 max-h-[420px] overflow-auto space-y-2">{effInstList.map(e => {
+                    const key = `${e.wilayat}||${e.institution}||${assignYear}`;
+                    const cur = yearAssignments[key] ?? e.assignments;
+                    const hasOverride = key in yearAssignments;
+                    return <div key={key} className="rounded-lg border p-3"><div className="flex justify-between gap-2"><span className="font-bold text-sm">{e.institution} <span className="text-xs font-normal text-[var(--muted)]">· {e.wilayat} {hasOverride ? "· Year-specific" : "· Permanent"}</span></span><button type="button" onClick={async () => { const assignments = cur; const assignId = `audit_institution_assignments_${e.wilayat.replace(/\s+/g,'_')}_${e.institution.replace(/\s+/g,'_')}_${assignYear}`; setYearAssignments(prev => ({ ...prev, [key]: [...assignments] })); await syncSaveFirst(assignId, { id: assignId, wilayat: e.wilayat, institution: e.institution, year: String(assignYear), assignments }); setInstMsg(`Saved ${e.institution} for ${assignYear}: ${assignments.join(", ") || "None"}`); }} className="rounded-lg bg-[var(--teal)] px-3 py-1 text-xs font-bold text-white">Save {assignYear}</button></div><div className="mt-2 flex flex-wrap gap-2">{["General Nursing","Labour Rooms","Renal Medicine Center","Part 1"].map(cat => <label key={cat} className="flex items-center gap-1 text-xs font-semibold"><input type="checkbox" checked={cur.includes(cat)} onChange={() => { const next = cur.includes(cat) ? cur.filter(c => c !== cat) : [...cur, cat]; setYearAssignments(prev => ({ ...prev, [key]: next })); }} className="w-auto" /> {cat}</label>)}</div></div>;
+                  })}</div>
+                  <p className="mt-2 text-xs text-[var(--muted)]">Tip: If 2027 has no Labour Rooms plan, untick Labour Rooms and tick General Nursing for Shinas LR / Saham Hospital / Suwaiq Hospital — they will show in General Nursing grid only for 2027.</p>
                 </div>
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                  <form onSubmit={saveInstitution} className="card p-4"><h3 className="font-extrabold">{editingInst ? "Edit institution" : "Add institution"}</h3><label className="mt-3 block text-sm font-bold">Wilayat<select value={instForm.wilayat} onChange={e => setInstForm({ ...instForm, wilayat: e.target.value })} className="mt-1 w-full">{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Institution name<input value={instForm.name} onChange={e => setInstForm({ ...instForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. Khaboorah EHC" /></label><fieldset className="mt-3"><legend className="text-sm font-bold">Assignments</legend>{["Part 1", "General Nursing", "Renal Medicine Center", "Labour Rooms"].map(a => <label key={a} className="mt-2 flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={instForm.assignments.includes(a)} onChange={() => toggleInstAssignment(a)} className="w-auto" /> {a}</label>)}</fieldset>{instMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{instMsg}</p>}<div className="mt-4 flex gap-2"><button disabled={busy} className="flex-1 rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingInst ? "Save changes" : "Add institution"}</button>{editingInst && <button type="button" onClick={() => { setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"] }); }} className="rounded-lg border px-3 py-2 font-bold">Cancel</button>}</div></form>
-                  <div className="card p-4"><h3 className="font-extrabold">Institutions ({effInstList.length})</h3><div className="mt-3 space-y-2 max-h-[420px] overflow-auto">{WILAYAT_ORDER.map(w => { const items = effInstList.filter(e => e.wilayat === w); if (!items.length) return null; return <div key={w}><h4 className="font-bold">{w} — {items.length}</h4><div className="mt-1 space-y-1">{items.map(e => <div key={e.wilayat + e.institution} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold [overflow-wrap:anywhere]">{e.institution}</span><span className="text-xs text-[var(--muted)]">{e.assignments.join(" · ")}</span><button type="button" onClick={() => { setEditingInst(e); setInstForm({ wilayat: e.wilayat, name: e.institution, assignments: [...e.assignments] }); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Edit</button></div>)}</div></div>; })}</div></div>
+                  {isMaster && <div className="card p-4"><h3 className="flex items-center gap-2 font-extrabold"><Users size={18} /> Accounts — Master only</h3><p className="mt-1 text-xs text-[var(--muted)]">Latest passwords from Supabase (audit_data). Visible only to Master.</p><div className="mt-3 space-y-2">{effectiveUsers.map(u => <div key={u.username} className="flex justify-between gap-2 rounded-lg border p-3 text-sm"><span><strong>{u.label}</strong> — {u.username} · {u.role} · {u.wilayat}</span><span className="text-[var(--muted)]">Password: {u.password}</span></div>)}</div></div>}
+                  {isMaster && (
+                  <form onSubmit={changePassword} className="card p-4"><h3 className="font-extrabold">Change a password — Master only</h3><p className="mt-1 text-xs text-[var(--muted)]">Only Master can change passwords. Latest passwords from Supabase appear in Accounts board.</p><label className="mt-3 block text-sm font-bold">Account<select value={pwdForm.username} onChange={e => setPwdForm({ ...pwdForm, username: e.target.value })} className="mt-1 w-full">{effectiveUsers.filter(u => u.username !== "master").map(u => <option key={u.username} value={u.username}>{u.label} ({u.username}) — {u.role}</option>)}</select></label><label className="mt-3 block text-sm font-bold">New password<div className="mt-1 flex gap-2"><input type={showPwd ? "text" : "password"} value={pwdForm.password} onChange={e => setPwdForm({ ...pwdForm, password: e.target.value })} className="flex-1" placeholder="At least 4 characters" /><button type="button" onClick={() => setShowPwd(!showPwd)} className="rounded-lg border px-3 text-sm font-bold" aria-label={showPwd ? "Hide password" : "Show password"}>{showPwd ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><label className="mt-3 block text-sm font-bold">Confirm new password<input type={showPwd ? "text" : "password"} value={pwdConfirm} onChange={e => setPwdConfirm(e.target.value)} className="mt-1 w-full" placeholder="Re-enter new password" /></label>{pwdMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{pwdMsg}</p>}<button disabled={busy} className="mt-4 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Update password</button></form>
+                )}
                 </div>
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                  <form onSubmit={saveProcedure} className="card p-4"><h3 className="font-extrabold">{editingProc ? "Edit procedure" : "Add procedure"}</h3><label className="mt-3 block text-sm font-bold">Procedure name<input value={procForm.name} onChange={e => setProcForm({ ...procForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. IV Cannulation" /></label><label className="mt-3 block text-sm font-bold">Tag<select value={procForm.tag} onChange={e => setProcForm({ ...procForm, tag: e.target.value })} className="mt-1 w-full"><option value="General">General</option><option value="LR">[LR]</option><option value="RMC">[RMC]</option></select></label>{procMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{procMsg}</p>}<button disabled={busy} className="mt-4 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingProc ? "Save changes" : "Add procedure"}</button></form>
-                  <div className="card p-4"><h3 className="font-extrabold">Procedures ({effectiveProcedures.length})</h3><div className="mt-3 flex gap-2"><input value={procSearch} onChange={e => setProcSearch(e.target.value)} placeholder="Search..." className="flex-1 text-sm" /><select value={procFilterTag} onChange={e => setProcFilterTag(e.target.value)} className="text-sm"><option value="All">All</option><option value="General">General</option><option value="LR">[LR]</option><option value="RMC">[RMC]</option></select></div><div className="mt-3 max-h-[420px] space-y-1 overflow-auto">{effectiveProcedures.filter(p => { if (procFilterTag !== "All" && procTag(p) !== procFilterTag) return false; if (procSearch && !p.toLowerCase().includes(procSearch.toLowerCase())) return false; return true; }).map(p => <div key={p} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="chip bg-[var(--surface2)]">{procTag(p)}</span><span className="font-semibold [overflow-wrap:anywhere]">{p}</span><button type="button" onClick={() => { setEditingProc({ name: p }); setProcForm({ name: p, tag: procTag(p) }); }} className="ml-auto rounded-full border px-2 py-1 text-xs font-bold">Edit</button></div>)}</div></div>
+                  <form onSubmit={saveInstitution} className="card p-4"><h3 className="font-extrabold">{editingInst ? "Edit institution" : "Add institution"}</h3><p className="mt-1 text-xs text-[var(--muted)]">Assignments are linked to Plan Year. Same institution can be General Nursing only in 2027, and General + Labour Rooms in 2028. If Labour Rooms / RMC has no plan for a year, its institutions automatically show under General Nursing that year.</p><label className="mt-3 block text-sm font-bold">Plan Year — assignments apply to this year<select value={instForm.year} onChange={e => { const y = e.target.value; const key = `${instForm.wilayat}||${instForm.name}||${y}`; const saved = yearAssignments[key]; setInstForm({ ...instForm, year: y, assignments: saved && saved.length ? [...saved] : instForm.assignments }); }} className="mt-1 w-full">{Array.from({length: 14}, (_, i) => 2027 + i).map(y => <option key={y} value={String(y)}>{y}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Wilayat<select value={instForm.wilayat} onChange={e => setInstForm({ ...instForm, wilayat: e.target.value })} className="mt-1 w-full">{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Institution name<input value={instForm.name} onChange={e => setInstForm({ ...instForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. Khaboorah EHC" /></label><fieldset className="mt-3"><legend className="text-sm font-bold">Assignments for {instForm.year}</legend>{["Part 1", "General Nursing", "Renal Medicine Center", "Labour Rooms"].map(a => <label key={a} className="mt-2 flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={instForm.assignments.includes(a)} onChange={() => toggleInstAssignment(a)} className="w-auto" /> {a}</label>)}</fieldset>{instMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{instMsg}</p>}<div className="mt-4 flex gap-2"><button disabled={busy} className="flex-1 rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingInst ? `Save for ${instForm.year}` : `Add for ${instForm.year}`}</button><button type="button" onClick={saveInstYearAssignmentOnly} disabled={busy} className="rounded-lg border px-3 py-2 text-sm font-bold">Save assignments only</button>{editingInst && <button type="button" onClick={() => { setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"], year: instForm.year }); }} className="rounded-lg border px-3 py-2 font-bold">Cancel</button>}</div></form>
+                  <div className="card p-4"><h3 className="font-extrabold">Institutions ({effInstList.length})</h3><div className="mt-3 space-y-2 max-h-[420px] overflow-auto">{WILAYAT_ORDER.map(w => { const items = effInstList.filter(e => e.wilayat === w); if (!items.length) return null; return <div key={w}><h4 className="font-bold">{w} — {items.length}</h4><div className="mt-1 space-y-1">{items.map(e => <div key={e.wilayat + e.institution} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold [overflow-wrap:anywhere]">{e.institution}</span><span className="text-xs text-[var(--muted)]">{(() => { const k = `${e.wilayat}||${e.institution}||${instForm.year}`; const ya = yearAssignments[k]; return ya && ya.length ? `${ya.join(" · ")} (${instForm.year})` : e.assignments.join(" · "); })()}</span><div className="ml-auto flex gap-1"><button type="button" onClick={() => { setEditingInst(e); const yr = instForm.year || "2027"; const key = `${e.wilayat}||${e.institution}||${yr}`; const saved = yearAssignments[key]; setInstForm({ wilayat: e.wilayat, name: e.institution, assignments: saved && saved.length ? [...saved] : [...e.assignments], year: yr }); }} className="rounded-full border px-2 py-1 text-xs font-bold">Edit</button><button type="button" onClick={() => deleteInstitution(e)} className="rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-bold text-red-600 hover:bg-red-100">Delete</button></div></div>)}</div></div>; })}</div></div>
+                </div>
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <form onSubmit={saveProcedure} className="card p-4"><h3 className="font-extrabold">{editingProc ? "Edit procedure" : "Add procedure"}</h3><label className="mt-3 block text-sm font-bold">Procedure name<input value={procForm.name} onChange={e => setProcForm({ ...procForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. IV Cannulation" /></label><label className="mt-3 block text-sm font-bold">Tag<select value={procForm.tag} onChange={e => setProcForm({ ...procForm, tag: e.target.value })} className="mt-1 w-full"><option value="General">General</option><option value="LR">[LR]</option><option value="RMC">[RMC]</option></select></label>{procMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{procMsg}</p>}<div className="mt-4 flex gap-2"><button disabled={busy} className="flex-1 rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingProc ? "Save changes" : "Add procedure"}</button>{editingProc && <button type="button" onClick={() => { setEditingProc(null); setProcForm({ name: "", tag: "General" }); }} className="rounded-lg border px-3 py-2 font-bold">Cancel</button>}</div></form>
+                  <div className="card p-4"><h3 className="font-extrabold">Procedures ({effectiveProcedures.length})</h3><div className="mt-3 flex gap-2"><input value={procSearch} onChange={e => setProcSearch(e.target.value)} placeholder="Search..." className="flex-1 text-sm" /><select value={procFilterTag} onChange={e => setProcFilterTag(e.target.value)} className="text-sm"><option value="All">All</option><option value="General">General</option><option value="LR">[LR]</option><option value="RMC">[RMC]</option></select></div><div className="mt-3 max-h-[420px] space-y-1 overflow-auto">{effectiveProcedures.filter(p => { if (procFilterTag !== "All" && procTag(p) !== procFilterTag) return false; if (procSearch && !p.toLowerCase().includes(procSearch.toLowerCase())) return false; return true; }).map(p => <div key={p} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="chip bg-[var(--surface2)]">{procTag(p)}</span><span className="font-semibold [overflow-wrap:anywhere]">{p}</span><div className="ml-auto flex gap-1"><button type="button" onClick={() => { setEditingProc({ name: p }); setProcForm({ name: p, tag: procTag(p) }); }} className="rounded-full border px-2 py-1 text-xs font-bold">Edit</button><button type="button" onClick={() => deleteProcedure(p)} className="rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-bold text-red-600 hover:bg-red-100">Delete</button></div></div>)}</div></div>
                 </div>
               </section>
             )}
@@ -1201,8 +1640,8 @@ export default function App() {
                 </>}
               </section>}
 
-              {tab === "Comments" && <section className="card p-4"><h2 className="flex items-center gap-2 font-extrabold"><MessageSquare size={18} /> Comments — {topic}</h2><p className="mt-1 text-sm text-[var(--muted)]">{dbLabel}</p>
-                <div className="mt-3 space-y-3">{planScores.filter(s => s.comment || s.auditorName).map(c => <article key={c.id} className="rounded-xl border p-3"><div className="flex justify-between"><p className="font-bold">{labelFor(c.wilayat, c.institution)} — {c.period}</p><span className="font-black">{c.score}</span></div><p className="mt-1 text-sm [overflow-wrap:anywhere]">{c.comment || "No comment"}</p><p className="mt-1 text-xs text-[var(--muted)]">Audited by: {c.auditorName || "—"} · Added at: {c.auditedAt ? formatMuscat(c.auditedAt) : "—"} · {c.wilayat}</p></article>)}{planScores.filter(s => s.comment || s.auditorName).length === 0 && <p className="text-sm">No comments yet.</p>}</div>
+              {tab === "Comments" && <section className="card p-4"><h2 className="flex items-center gap-2 font-extrabold"><MessageSquare size={18} /> Comments — {topic}</h2><p className="mt-1 text-sm text-[var(--muted)]">{dbLabel} {isAdmin ? "· Master/Admin sees all Wilayats" : `· Only ${user?.wilayat} comments`}</p>
+                <div className="mt-3 space-y-3">{planScores.filter(s => (s.comment || s.auditorName) && (isAdmin || s.wilayat === user?.wilayat)).map(c => <article key={c.id} className="rounded-xl border p-3"><div className="flex justify-between"><p className="font-bold">{labelFor(c.wilayat, c.institution)} — {c.period}</p><span className="font-black">{c.score}</span></div><p className="mt-1 text-sm [overflow-wrap:anywhere]">{c.comment || "No comment"}</p><p className="mt-1 text-xs text-[var(--muted)]">Audited by: {c.auditorName || "—"} · Added at: {c.auditedAt ? formatMuscat(c.auditedAt) : "—"} · {c.wilayat}</p></article>)}{planScores.filter(s => (s.comment || s.auditorName) && (isAdmin || s.wilayat === user?.wilayat)).length === 0 && <p className="text-sm">No comments yet.</p>}</div>
               </section>}
             </>}
 
@@ -1243,7 +1682,7 @@ export default function App() {
                           return <tr key={v.wilayat + v.institution} className={isEditingRow ? "editing-row" : ""}>
                             <td className="font-bold [overflow-wrap:anywhere]">{labelFor(v.wilayat, v.institution)}<span className="block text-xs font-normal text-[var(--muted)]">{v.wilayat}</span></td>
                             {activeCompPlan.periods.map((period, idx) => {
-                              if (activeCompPlan.feedback?.[idx]) return <td key={idx} style={{ background: "#ede9fe" }} title="Obtaining Feedback — no score"><span className="text-xs font-bold">Feedback — no score</span></td>;
+                              if (activeCompPlan.feedback?.[idx]) return <td key={idx} style={{ background: "#ede9fe" }} title="Obtaining Feedback"><span className="text-xs font-bold">Obtaining Feedback</span></td>;
                               if (!activeCompPlan.procedures?.[idx]) return <td key={idx}></td>;
                               const block = blockForMonth(activeCompPlan, idx); if (!block) return <td key={idx}></td>;
                               if (idx !== block.start) return null; // colSpan on the start cell already covers this month — rendering another <td> here shifted every later column (Apr-May looked covered in Jan, Jun-Jul looked blocked, Feedback appeared outside the table)
@@ -1269,20 +1708,20 @@ export default function App() {
                 </>}
               </section>}
 
-              {tab === "Comments" && <section className="card p-4"><h2 className="flex items-center gap-2 font-extrabold"><MessageSquare size={18} /> Comments — {category}</h2><p className="mt-1 text-sm text-[var(--muted)]">{dbLabel}</p>
-                <div className="mt-3 space-y-3">{compPlanScores.filter(s => s.comment || s.auditorName).map(c => <article key={c.id} className="rounded-xl border p-3"><div className="flex justify-between"><p className="font-bold">{labelFor(c.wilayat, c.institution)} — {c.period} — {displayProcedure(c.procedure)}</p><span className="font-black">{c.score}</span></div><p className="mt-1 text-sm [overflow-wrap:anywhere]">{c.comment || "No comment"}</p><p className="mt-1 text-xs text-[var(--muted)]">Audited by: {c.auditorName || "—"} · Added at: {c.auditedAt ? formatMuscat(c.auditedAt) : "—"} · {c.wilayat}</p></article>)}{compPlanScores.filter(s => s.comment || s.auditorName).length === 0 && <p className="text-sm">No comments yet.</p>}</div>
+              {tab === "Comments" && <section className="card p-4"><h2 className="flex items-center gap-2 font-extrabold"><MessageSquare size={18} /> Comments — {category}</h2><p className="mt-1 text-sm text-[var(--muted)]">{dbLabel} {isAdmin ? "· Master/Admin sees all Wilayats" : `· Only ${user?.wilayat} comments`}</p>
+                <div className="mt-3 space-y-3">{compPlanScores.filter(s => (s.comment || s.auditorName) && (isAdmin || s.wilayat === user?.wilayat)).map(c => <article key={c.id} className="rounded-xl border p-3"><div className="flex justify-between"><p className="font-bold">{labelFor(c.wilayat, c.institution)} — {c.period} — {displayProcedure(c.procedure)}</p><span className="font-black">{c.score}</span></div><p className="mt-1 text-sm [overflow-wrap:anywhere]">{c.comment || "No comment"}</p><p className="mt-1 text-xs text-[var(--muted)]">Audited by: {c.auditorName || "—"} · Added at: {c.auditedAt ? formatMuscat(c.auditedAt) : "—"} · {c.wilayat}</p></article>)}{compPlanScores.filter(s => (s.comment || s.auditorName) && (isAdmin || s.wilayat === user?.wilayat)).length === 0 && <p className="text-sm">No comments yet.</p>}</div>
               </section>}
             </>}
 
             {tab === "Plans" && isAdmin && <section className="card p-4">
-              <h2 className="text-xl font-black">Plans</h2><p className="mt-1 text-sm text-[var(--muted)]">Create Monthly plans (Jan-Dec). Plans are saved to the shared audit_data table — only the changed plan row is upserted. {dbLabel}</p>
+              <div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-xl font-black">Plans</h2><p className="mt-1 text-sm text-[var(--muted)]">Create Monthly plans (Jan-Dec). Plans are saved to the shared audit_data table — only the changed plan row is upserted. {dbLabel}</p></div><button type="button" onClick={restoreAllDeletedPlans} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100">Restore deleted / Clear tombstones ({planTombstones.length + compPlanTombstones.length})</button></div>
               <div className="mt-4 grid gap-4 lg:grid-cols-2">
                 <form onSubmit={createPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 1 plan</h3><label className="mt-3 block text-sm font-bold">Topic<select value={newPlan.topic} onChange={e => setNewPlan({ ...newPlan, topic: e.target.value })} className="mt-1 w-full">{TOPICS.map(t => <option key={t} value={t}>{t}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<select value={newPlan.year} onChange={e => setNewPlan({ ...newPlan, year: Number(e.target.value) })} className="mt-1 w-full">{Array.from({ length: 14 }, (_, k) => 2027 + k).map(y => <option key={y} value={y}>{y}</option>)}</select></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 1 plan</button></form>
                 <form onSubmit={createCompPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">{editingCompPlanId ? "Edit Part 2 plan" : "Create Part 2 plan"}</h3><label className="mt-3 block text-sm font-bold">Category<select value={newCompPlan.category} onChange={e => { setNewCompPlan({ ...newCompPlan, category: e.target.value, procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] }); setCompProcSearch(Array(12).fill(undefined as any)); setOpenProcIdx(null); }} className="mt-1 w-full">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<select value={newCompPlan.year} onChange={e => { setNewCompPlan({ ...newCompPlan, year: Number(e.target.value), procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] }); setCompProcSearch(Array(12).fill(undefined as any)); setOpenProcIdx(null); }} className="mt-1 w-full">{Array.from({ length: 14 }, (_, k) => 2027 + k).map(y => <option key={y} value={y}>{y}</option>)}</select></label><div className="mt-4 space-y-2"><p className="text-xs font-bold uppercase text-[var(--muted)]">Month by month — tap to open, type to filter inside the list</p>{MONTHS.map((m, i) => {
           const isFb = !!newCompPlan.feedback[i];
           const shown = isFb ? "Obtaining Feedback" : newCompPlan.procedures[i] ? newCompPlan.procedures[i]! : "Skipped";
           const q = (compProcSearch[i] ?? "").trim().toLowerCase();
-          const filteredProcs = q ? PROCEDURES.filter(pr => pr.toLowerCase().includes(q)) : PROCEDURES;
+          const filteredProcs = q ? effectiveProcedures.filter(pr => pr.toLowerCase().includes(q)) : effectiveProcedures;
           const isOpen = openProcIdx === i;
           return <div key={m} className="rounded-lg border p-2" style={isFb ? { background: "#ede9fe", borderColor: "#a78bfa" } : undefined}>
             <div className="flex flex-wrap items-center gap-2">
@@ -1300,7 +1739,7 @@ export default function App() {
                   spellCheck={false}
                 />
                 {isOpen && <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[52vh] overflow-auto rounded-xl border bg-white shadow-xl">
-                  <div className="sticky top-0 border-b bg-white px-2 py-1.5 text-[11px] font-bold uppercase text-[var(--muted)]">{q ? `${filteredProcs.length} matching "${compProcSearch[i]}"` : `All procedures — ${PROCEDURES.length}`}</div>
+                  <div className="sticky top-0 border-b bg-white px-2 py-1.5 text-[11px] font-bold uppercase text-[var(--muted)]">{q ? `${filteredProcs.length} matching "${compProcSearch[i]}"` : `All procedures — ${effectiveProcedures.length}`}</div>
                   <button type="button" onClick={() => { setCompMonth(i, "feedback"); setCompProcSearch(prev => { const n = [...prev]; n[i] = undefined as any; return n; }); setOpenProcIdx(null); }} className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-black ${isFb ? "bg-[#ede9fe] text-[#4c1d95]" : ""}`}><span className="rounded bg-[#4c1d95] px-2 py-0.5 text-[11px] text-white">Top</span> Obtaining Feedback</button>
                   <button type="button" onClick={() => { setCompMonth(i, "skip"); setCompProcSearch(prev => { const n = [...prev]; n[i] = undefined as any; return n; }); setOpenProcIdx(null); }} className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-bold ${!isFb && !newCompPlan.procedures[i] ? "bg-gray-100" : ""}`}><span className="rounded bg-gray-200 px-2 py-0.5 text-[11px]">Top</span> Skipped — no score</button>
                   {filteredProcs.map(pr => <button key={pr} type="button" onClick={() => { setCompMonth(i, "procedure", pr); setCompProcSearch(prev => { const n = [...prev]; n[i] = undefined as any; return n; }); setOpenProcIdx(null); }} className={`w-full px-3 py-2.5 text-left text-sm ${newCompPlan.procedures[i] === pr ? "bg-[var(--teal)] text-white font-black" : "hover:bg-[var(--surface2)]"}`}>{pr}</button>)}
@@ -1309,7 +1748,7 @@ export default function App() {
               </div>
               <button type="button" onClick={() => setOpenProcIdx(isOpen ? null : i)} className="rounded-lg border px-2.5 py-2 text-xs font-bold">{isOpen ? "Close ▲" : "Open ▼"}</button>
             </div>
-            <div className="mt-1.5 text-xs">{isFb ? <span className="rounded bg-[#4c1d95] px-2 py-1 text-xs font-bold text-white">Obtaining Feedback — no score</span> : !newCompPlan.procedures[i] ? <span className="text-[var(--muted)]">Skipped — no score</span> : <span className="text-[var(--muted)]">{shown}</span>}</div>
+            <div className="mt-1.5 text-xs">{isFb ? <span className="rounded bg-[#4c1d95] px-2 py-1 text-xs font-bold text-white">Obtaining Feedback</span> : !newCompPlan.procedures[i] ? <span className="text-[var(--muted)]">Skipped — no score</span> : <span className="text-[var(--muted)]">{shown}</span>}</div>
           </div>; })}</div>{editingCompPlanId && <button type="button" onClick={() => { setEditingCompPlanId(null); setCompProcSearch(Array(12).fill(undefined as any)); setOpenProcIdx(null); setNewCompPlan({ category: CATEGORIES[0] as string, year: 2027, procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] }); }} className="mt-3 w-full rounded-lg border py-2 font-bold">Cancel edit — back to Create</button>}<button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingCompPlanId ? "Save changes to Part 2 plan" : "Create Part 2 plan"}</button></form>
               </div>
               <div className="mt-6 grid gap-4 lg:grid-cols-2">

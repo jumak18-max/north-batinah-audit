@@ -146,12 +146,17 @@ function buildZip(files: ZipFile[]): Uint8Array {
 }
 
 
+
 function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const len = bin.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
+  try {
+    const bin = atob(b64);
+    const len = bin.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  } catch {
+    return new Uint8Array();
+  }
 }
 
 function buildDocxBytes(category: string, year: number, seen: string[], rowMonths: number[][], periods: string[], logoDataUrl?: string) {
@@ -159,7 +164,8 @@ function buildDocxBytes(category: string, year: number, seen: string[], rowMonth
   const tableRowsXml = seen.map((proc, r) => {
     const isFbRow = proc === "Obtaining Feedback";
     const isSkipRow = proc === "— Skipped —";
-    const procText = (isFbRow || isSkipRow) ? "" : escapeXml(displayProcedure(proc) || proc);
+    // Use proc directly, no displayProcedure dependency (fixes scope bug that caused "Could not build Word file")
+    const procText = (isFbRow || isSkipRow) ? "" : escapeXml(proc || "");
     const serialCell = `<w:tc><w:tcPr><w:tcW w:w="600" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>${r + 1}</w:t></w:r></w:p></w:tc>`;
     const procCell = `<w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:r><w:t>${procText}</w:t></w:r></w:p></w:tc>`;
     const monthCells = periods.map((_, i) => {
@@ -181,7 +187,6 @@ function buildDocxBytes(category: string, year: number, seen: string[], rowMonth
     ${periods.map(m => `<w:tc><w:tcPr><w:tcW w:w="800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="0d6e6b"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>${escapeXml(m)}</w:t></w:r></w:p></w:tc>`).join("")}
   </w:tr>`;
 
-  // Logo handling for docx
   let hasLogo = false;
   let logoB64 = "";
   let logoExt = "jpeg";
@@ -220,7 +225,7 @@ function buildDocxBytes(category: string, year: number, seen: string[], rowMonth
   if (hasLogo) {
     try {
       const imgBytes = base64ToBytes(logoB64);
-      files.push({ name: `word/media/image1.${logoExt}`, data: imgBytes });
+      if (imgBytes.length) files.push({ name: `word/media/image1.${logoExt}`, data: imgBytes });
     } catch {}
   }
   return buildZip(files);
@@ -972,37 +977,68 @@ export default function App() {
     if (fbMonths.length) { seen.push("Obtaining Feedback"); rowMonths.push(fbMonths); }
     if (skipMonths.length) { seen.push("— Skipped —"); rowMonths.push(skipMonths); }
 
+    // HTML version for desktop (old working version with logo)
+    const rowsHtml = seen.map((proc, r) => {
+      const isFbRow = proc === "Obtaining Feedback";
+      const isSkipRow = proc === "— Skipped —";
+      const procCell = (isFbRow || isSkipRow) ? "" : xmlEscape(displayProcedure(proc) || proc);
+      const monthCells = activeCompPlan.periods.map((_, i) => rowMonths[r].includes(i) ? `<td style="background:#c9ead9;">${isFbRow ? "Obtaining feedback" : isSkipRow ? "Skipped" : "&nbsp;"}</td>` : `<td>&nbsp;</td>`).join("");
+      return `<tr><td style="text-align:center;">${r + 1}</td><td style="text-align:left;">${procCell}</td>${monthCells}</tr>`;
+    }).join("");
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</title><style>@page WordSection1{size:29.7cm 21cm;mso-page-orientation:landscape;margin:1cm 1cm 1cm 1cm;} div.WordSection1{page:WordSection1;} body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#102a2c;} p{margin:4pt 0;} table{border-collapse:collapse;width:100%;font-size:9pt;} th,td{border:1pt solid #7a8a88;padding:4pt 5pt;text-align:center;vertical-align:middle;} th{background:#0d6e6b;color:#ffffff;font-weight:bold;} thead{display:table-header-group;} tr{page-break-inside:avoid;}</style></head><body><div class="WordSection1"><div style="text-align:center;"><p style="text-align:center;margin:0 0 6pt;"><img src="${MOH_LOGO_DATA_URL}" alt="Ministry of Health logo" style="height:72px;width:auto;" /></p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Directorate General of Health Services - NBG</p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Nursing Service Department</p><p style="font-size:15pt;font-weight:bold;margin:4pt 0 10pt;">${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</p></div><table><thead><tr><th style="width:5%;">Serial Number</th><th style="width:22%;text-align:left;">Planned Procedures</th>${activeCompPlan.periods.map(m => `<th style="width:6.5%;">${m}</th>`).join("")}</tr></thead><tbody>${rowsHtml}</tbody></table></div></body></html>`;
+
+    const fileNameDoc = `${activeCompPlan.category.replace(/\s+/g, "_")}_Competency_Procedures_plan_${activeCompPlan.year}.doc`;
     const fileNameDocx = `${activeCompPlan.category.replace(/\s+/g, "_")}_Competency_Procedures_plan_${activeCompPlan.year}.docx`;
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
 
-    try {
-      // Always build real .docx with MOH logo embedded — works on desktop, Android, and iPhone 17 Pro Max
-      const zipBytes = buildDocxBytes(activeCompPlan.category, activeCompPlan.year, seen, rowMonths, activeCompPlan.periods, MOH_LOGO_DATA_URL);
-      const zipCopy: Uint8Array<ArrayBuffer> = new Uint8Array(zipBytes);
-      const blobDocx = new Blob([zipCopy.buffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
-
-      if (isIOS) {
+    if (isIOS) {
+      try {
+        const zipBytes = buildDocxBytes(activeCompPlan.category, activeCompPlan.year, seen, rowMonths, activeCompPlan.periods, MOH_LOGO_DATA_URL);
+        const zipCopy: Uint8Array<ArrayBuffer> = new Uint8Array(zipBytes);
+        const blobDocx = new Blob([zipCopy.buffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
         const fileDocx = new File([blobDocx], fileNameDocx, { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
         const nav: any = navigator as any;
         if (nav.canShare && nav.canShare({ files: [fileDocx] }) && nav.share) {
           await nav.share({ files: [fileDocx], title: fileNameDocx, text: fileNameDocx });
           return;
         }
+        const urlDocx = URL.createObjectURL(blobDocx);
+        const a = document.createElement("a");
+        a.style.display = "none";
+        a.href = urlDocx;
+        (a as any).download = fileNameDocx;
+        a.setAttribute("download", fileNameDocx);
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(urlDocx); }, 6000);
+        return;
+      } catch (e) {
+        console.log("iOS docx failed, fallback to html view", e);
+        try {
+          const viewBlob = new Blob(["\ufeff" + html], { type: "text/html;charset=utf-8" });
+          const viewUrl = URL.createObjectURL(viewBlob);
+          window.open(viewUrl, "_blank");
+          setTimeout(() => URL.revokeObjectURL(viewUrl), 8000);
+          return;
+        } catch {}
       }
+    }
 
-      // Desktop / Android and iOS fallback: normal download
-      const urlDocx = URL.createObjectURL(blobDocx);
+    // Desktop — restore old working .doc with logo (you said "at least desktop version like before")
+    try {
+      const blob = new Blob(["\ufeff" + html], { type: "application/msword;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.style.display = "none";
-      a.href = urlDocx;
-      (a as any).download = fileNameDocx;
-      a.setAttribute("download", fileNameDocx);
+      a.href = url;
+      (a as any).download = fileNameDoc;
+      a.setAttribute("download", fileNameDoc);
       document.body.appendChild(a);
       a.click();
-      setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(urlDocx); }, isIOS ? 6000 : 2500);
-    } catch (e) {
-      console.log("docx build failed", e);
-      alert("Could not build Word file. Please try again.");
+      setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, 2500);
+    } catch (e: any) {
+      console.log("desktop doc build failed", e);
+      alert("Could not build Word file: " + (e?.message || e));
     }
   }
   async function createPlan(e: React.FormEvent) {

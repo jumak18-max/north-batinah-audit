@@ -332,8 +332,6 @@ export default function App() {
     try { const s = localStorage.getItem('audit_tombstones_compPlans'); return s ? JSON.parse(s) : []; } catch { return []; }
   });
   const [instOverrides, setInstOverrides] = useState<InstOverride[]>([]);
-  const [yearAssignments, setYearAssignments] = useState<Record<string, string[]>>({});
-  const [assignYear, setAssignYear] = useState<number>(2027);
   const [procOverrides, setProcOverrides] = useState<ProcOverride[]>([]);
   const [auditorProfiles, setAuditorProfiles] = useState<AuditorProfile[]>([]);
   const [security, setSecurity] = useState<SecuritySettings>(DEFAULT_SECURITY);
@@ -377,7 +375,7 @@ export default function App() {
   };
   const [editingProcedures, setEditingProcedures] = useState<(string | null)[]>([]);
   const [editingFeedback, setEditingFeedback] = useState<boolean[]>([]);
-  const [instForm, setInstForm] = useState({ wilayat: "Suhar", name: "", assignments: ["Part 1"] as string[], year: "2027" });
+  const [instForm, setInstForm] = useState({ wilayat: "Suhar", name: "", assignments: ["Part 1"] as string[] });
   const [editingInst, setEditingInst] = useState<EffInst | null>(null);
   const [instMsg, setInstMsg] = useState("");
   const [procForm, setProcForm] = useState({ name: "", tag: "General" });
@@ -454,19 +452,8 @@ export default function App() {
     const out: Record<string, string[]> = {}; WILAYAT_ORDER.forEach(w => { out[w] = effInstList.filter(e => e.wilayat === w && e.assignments.includes("Part 1")).map(e => e.institution).sort((a, b) => a.localeCompare(b)); }); return out;
   }, [effInstList]);
   const effComp = useMemo<Record<string, { wilayat: string; institution: string }[]>>(() => {
-    const yr = activeCompPlan?.year ? String(activeCompPlan.year) : undefined;
-    const out: Record<string, { wilayat: string; institution: string }[]> = {};
-    CATEGORIES.forEach(cat => {
-      out[cat] = effInstList.filter(e => {
-        if (yr) {
-          const k = `${e.wilayat}||${e.institution}||${yr}`;
-          if (k in yearAssignments) return yearAssignments[k].includes(cat);
-        }
-        return e.assignments.includes(cat);
-      }).map(e => ({ wilayat: e.wilayat, institution: e.institution })).sort((a, b) => WILAYAT_ORDER.indexOf(a.wilayat) - WILAYAT_ORDER.indexOf(b.wilayat) || a.institution.localeCompare(b.institution));
-    });
-    return out;
-  }, [effInstList, yearAssignments, activeCompPlan?.year]);
+    const out: Record<string, { wilayat: string; institution: string }[]> = {}; CATEGORIES.forEach(cat => { out[cat] = effInstList.filter(e => e.assignments.includes(cat)).map(e => ({ wilayat: e.wilayat, institution: e.institution })).sort((a, b) => WILAYAT_ORDER.indexOf(a.wilayat) - WILAYAT_ORDER.indexOf(b.wilayat) || a.institution.localeCompare(b.institution)); }); return out;
+  }, [effInstList]);
   const effectiveProcedures = useMemo<string[]>(() => {
     const map = new Map<string, { name: string }>(); PROCEDURES.forEach(p => map.set(p.toLowerCase(), { name: p }));
     procOverrides.forEach(rec => {
@@ -492,7 +479,6 @@ export default function App() {
     let hasData = false;
     const newPlans: Plan[] = []; const newScores: Score[] = []; const newCompPlans: CompPlan[] = []; const newCompScores: CompScore[] = [];
     const newInst: InstOverride[] = []; const newProc: ProcOverride[] = []; const newPwd: PwdOverride[] = []; const newAuditor: AuditorProfile[] = [];
-    const newYearAssign: Record<string, string[]> = {};
     let newSecurity: SecuritySettings | null = null; let newSecId = ""; const newAttempts: LoginAttempt[] = [];
     let sessionCandidate: { username: string; sessionVersion: number } | null = null;
     const newPlanTombstones: string[] = [];
@@ -508,15 +494,6 @@ export default function App() {
           else if (kind === "compPlan" && key) newCompPlanTombstones.push(key);
           else if (id.includes("_plan_") && d.key) newPlanTombstones.push(d.key);
           else if (id.includes("_compPlan_") && d.key) newCompPlanTombstones.push(d.key);
-          hasData = true;
-          return;
-        }
-        if (id.includes("institution_assignments_")) {
-          const wil = d.wilayat; const inst = d.institution; const yr = d.year;
-          if (wil && inst && yr) {
-            const k = `${wil}||${inst}||${yr}`;
-            newYearAssign[k] = Array.isArray(d.assignments) ? d.assignments : [];
-          }
           hasData = true;
           return;
         }
@@ -615,7 +592,6 @@ export default function App() {
     if (dedupedCompPlans.length) setCompPlans(prev => { const m = new Map(prev.map(x => [`${x.category}||${x.year}`, x])); dedupedCompPlans.forEach(x => { const k = `${x.category}||${x.year}`; const existing = m.get(k); if (existing) { m.set(k, { ...x, id: existing.id }); } else { m.set(k, x); } }); return [...m.values()]; });
     if (dedupedCompScores.length) setCompScores(prev => { const m = new Map(prev.map(x => [`${x.wilayat}||${x.institution}||${x.period}||${x.category || ''}`, x])); dedupedCompScores.forEach(x => { const k = `${x.wilayat}||${x.institution}||${x.period}||${x.category || ''}`; const existing = m.get(k); m.set(k, existing ? { ...x, planId: existing.planId, id: existing.id } : x); }); return [...m.values()]; });
     if (newInst.length) setInstOverrides(newInst);
-    if (Object.keys(newYearAssign).length) setYearAssignments(prev => ({ ...prev, ...newYearAssign }));
     if (newProc.length) setProcOverrides(newProc);
     if (newPwd.length) setOverrides(newPwd);
     if (newAuditor.length) setAuditorProfiles(newAuditor);
@@ -1313,10 +1289,6 @@ export default function App() {
       const val = { kind: editingInst ? "edit" : "add", wilayat: instForm.wilayat, name: cleanName, assignments: instForm.assignments, originalWilayat: editingInst?.wilayat, originalName: editingInst?.institution };
       if (editingInst) setInstOverrides(prev => prev.map(x => x.id === newId ? { ...x, ...val, id: newId } as InstOverride : x)); else setInstOverrides(prev => [...prev, { id: newId, ...val } as InstOverride]);
       await syncSaveFirst(`audit_institutions_${newId}`, { id: newId, ...val });
-      const yKey = `${instForm.wilayat}||${cleanName}||${instForm.year}`;
-      setYearAssignments(prev => ({ ...prev, [yKey]: [...instForm.assignments] }));
-      const assignId = `audit_institution_assignments_${instForm.wilayat.replace(/\s+/g,'_')}_${cleanName.replace(/\s+/g,'_')}_${instForm.year}`;
-      await syncSaveFirst(assignId, { id: assignId, wilayat: instForm.wilayat, institution: cleanName, year: instForm.year, assignments: instForm.assignments });
       setInstMsg(`Institution "${cleanName}" saved.`); setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"] });
     } catch (err: any) { setInstMsg(`Could not save: ${err.message}`); }
     setBusy(false);
@@ -1352,10 +1324,6 @@ export default function App() {
       });
       lastSaveAtRef.current = Date.now();
       await syncSaveFirst(`audit_institutions_${newId}`, { id: newId, ...val });
-      const yKey = `${instForm.wilayat}||${cleanName}||${instForm.year}`;
-      setYearAssignments(prev => ({ ...prev, [yKey]: [...instForm.assignments] }));
-      const assignId = `audit_institution_assignments_${instForm.wilayat.replace(/\s+/g,'_')}_${cleanName.replace(/\s+/g,'_')}_${instForm.year}`;
-      await syncSaveFirst(assignId, { id: assignId, wilayat: instForm.wilayat, institution: cleanName, year: instForm.year, assignments: instForm.assignments });
       setInstMsg(`Institution "${inst.institution}" deleted.`);
       if (editingInst && editingInst.wilayat === inst.wilayat && editingInst.institution === inst.institution) {
         setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"] });
@@ -1511,15 +1479,6 @@ export default function App() {
               <section>
                 <h2 className="text-xl font-black">Control Panel</h2>
                 <p className="mt-1 text-sm text-[var(--muted)]">Same panel in Part 1 and Part 2. Passwords, institutions, and procedures are saved in the shared database (audit_data) and apply immediately. {dbLabel}</p>
-                <div className="mt-4 card p-4"><h3 className="font-extrabold">Assignments by Year — Link Category to Year Plan</h3><p className="mt-1 text-sm text-[var(--muted)]">Variable by year, not permanent. If no plan for Labour Rooms / RMC in a year, assign those institutions to General Nursing for that year. Saham & Suwaiq Hospitals: General Nursing only in 2027, General + Labour Rooms in 2028. Shinas LR can move between General Nursing and Labour Rooms.</p>
-                  <div className="mt-3 flex gap-3 items-end"><label className="text-sm font-bold">Year<select value={assignYear} onChange={e => setAssignYear(Number(e.target.value))} className="mt-1 w-24">{[2027,2028,2029,2030,2031,2032,2033,2034,2035,2036,2037,2038,2039,2040].map(y => <option key={y} value={y}>{y}</option>)}</select></label><span className="text-xs text-[var(--muted)]">Showing {assignYear} assignments. Tick = appears in that category grid for {assignYear} plan.</span></div>
-                  <div className="mt-3 max-h-[420px] overflow-auto space-y-2">{effInstList.map(e => {
-                    const k = `${e.wilayat}||${e.institution}||${assignYear}`;
-                    const cur = yearAssignments[k] !== undefined ? yearAssignments[k] : e.assignments;
-                    const isCustom = k in yearAssignments;
-                    return <div key={k} className="rounded-lg border p-2"><div className="flex justify-between"><span className="text-sm font-bold">{e.institution} <span className="text-xs font-normal text-[var(--muted)]">· {e.wilayat} {isCustom ? "· Year-specific" : "· Permanent"}</span></span></div><div className="mt-2 flex flex-wrap gap-2">{["General Nursing","Labour Rooms","Renal Medicine Center","Part 1"].map(cat => <label key={cat} className="flex items-center gap-1 text-xs font-semibold"><input type="checkbox" checked={cur.includes(cat)} onChange={() => { const nxt = cur.includes(cat) ? cur.filter(c => c !== cat) : [...cur, cat]; setYearAssignments(p => ({ ...p, [k]: nxt })); }} className="w-auto" /> {cat}</label>)}</div><button type="button" onClick={() => { const assignId = `audit_institution_assignments_${e.wilayat.replace(/\s+/g,'_')}_${e.institution.replace(/\s+/g,'_')}_${assignYear}`; const toSave = yearAssignments[k] !== undefined ? yearAssignments[k] : e.assignments; syncSaveFirst(assignId, { id: assignId, wilayat: e.wilayat, institution: e.institution, year: String(assignYear), assignments: toSave }).then(() => setInstMsg(`Saved ${e.institution} for ${assignYear}`)); }} className="mt-2 rounded-lg bg-[var(--teal)] px-3 py-1 text-xs font-bold text-white">Save {assignYear}</button></div>;
-                  })}</div>
-                </div>
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
                   {isMaster && <div className="card p-4"><h3 className="flex items-center gap-2 font-extrabold"><Users size={18} /> Accounts — Master only</h3><p className="mt-1 text-xs text-[var(--muted)]">Latest passwords from Supabase (audit_data). Visible only to Master.</p><div className="mt-3 space-y-2">{effectiveUsers.map(u => <div key={u.username} className="flex justify-between gap-2 rounded-lg border p-3 text-sm"><span><strong>{u.label}</strong> — {u.username} · {u.role} · {u.wilayat}</span><span className="text-[var(--muted)]">Password: {u.password}</span></div>)}</div></div>}
                   {isMaster && (
@@ -1527,7 +1486,7 @@ export default function App() {
                 )}
                 </div>
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                  <form onSubmit={saveInstitution} className="card p-4"><h3 className="font-extrabold">{editingInst ? "Edit institution" : "Add institution"}</h3><label className="mt-3 block text-sm font-bold">Year — assignments linked to this year<select value={instForm.year} onChange={e => setInstForm({ ...instForm, year: e.target.value })} className="mt-1 w-full">{[2027,2028,2029,2030,2031,2032,2033,2034,2035,2036,2037,2038,2039,2040].map(y => <option key={y} value={String(y)}>{y}</option>)}</select></label><p className="mt-1 text-xs text-[var(--muted)]">Not permanent. {instForm.year} only. Saham Hospital can be General Nursing in 2027, General+Labour Rooms in 2028.</p><label className="mt-3 block text-sm font-bold">Wilayat<select value={instForm.wilayat} onChange={e => setInstForm({ ...instForm, wilayat: e.target.value })} className="mt-1 w-full">{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Institution name<input value={instForm.name} onChange={e => setInstForm({ ...instForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. Khaboorah EHC" /></label><fieldset className="mt-3"><legend className="text-sm font-bold">Assignments for {instForm.year}</legend>{["Part 1", "General Nursing", "Renal Medicine Center", "Labour Rooms"].map(a => <label key={a} className="mt-2 flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={instForm.assignments.includes(a)} onChange={() => toggleInstAssignment(a)} className="w-auto" /> {a}</label>)}</fieldset>{instMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{instMsg}</p>}<div className="mt-4 flex gap-2"><button disabled={busy} className="flex-1 rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingInst ? "Save changes" : "Add institution"}</button>{editingInst && <button type="button" onClick={() => { setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"], year: "2027" }); }} className="rounded-lg border px-3 py-2 font-bold">Cancel</button>}</div></form>
+                  <form onSubmit={saveInstitution} className="card p-4"><h3 className="font-extrabold">{editingInst ? "Edit institution" : "Add institution"}</h3><label className="mt-3 block text-sm font-bold">Wilayat<select value={instForm.wilayat} onChange={e => setInstForm({ ...instForm, wilayat: e.target.value })} className="mt-1 w-full">{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Institution name<input value={instForm.name} onChange={e => setInstForm({ ...instForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. Khaboorah EHC" /></label><fieldset className="mt-3"><legend className="text-sm font-bold">Assignments</legend>{["Part 1", "General Nursing", "Renal Medicine Center", "Labour Rooms"].map(a => <label key={a} className="mt-2 flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={instForm.assignments.includes(a)} onChange={() => toggleInstAssignment(a)} className="w-auto" /> {a}</label>)}</fieldset>{instMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{instMsg}</p>}<div className="mt-4 flex gap-2"><button disabled={busy} className="flex-1 rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingInst ? "Save changes" : "Add institution"}</button>{editingInst && <button type="button" onClick={() => { setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"] }); }} className="rounded-lg border px-3 py-2 font-bold">Cancel</button>}</div></form>
                   <div className="card p-4"><h3 className="font-extrabold">Institutions ({effInstList.length})</h3><div className="mt-3 space-y-2 max-h-[420px] overflow-auto">{WILAYAT_ORDER.map(w => { const items = effInstList.filter(e => e.wilayat === w); if (!items.length) return null; return <div key={w}><h4 className="font-bold">{w} — {items.length}</h4><div className="mt-1 space-y-1">{items.map(e => <div key={e.wilayat + e.institution} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold [overflow-wrap:anywhere]">{e.institution}</span><span className="text-xs text-[var(--muted)]">{e.assignments.join(" · ")}</span><div className="ml-auto flex gap-1"><button type="button" onClick={() => { setEditingInst(e); setInstForm({ wilayat: e.wilayat, name: e.institution, assignments: [...e.assignments] }); }} className="rounded-full border px-2 py-1 text-xs font-bold">Edit</button><button type="button" onClick={() => deleteInstitution(e)} className="rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-bold text-red-600 hover:bg-red-100">Delete</button></div></div>)}</div></div>; })}</div></div>
                 </div>
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">

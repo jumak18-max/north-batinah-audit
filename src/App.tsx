@@ -325,6 +325,12 @@ export default function App() {
   const [overrides, setOverrides] = useState<PwdOverride[]>([]);
   const [compPlans, setCompPlans] = useState<CompPlan[]>(DEFAULT_COMP_PLANS);
   const [compScores, setCompScores] = useState<CompScore[]>(DEFAULT_COMP_SCORES);
+  const [planTombstones, setPlanTombstones] = useState<string[]>(() => {
+    try { const s = localStorage.getItem('audit_tombstones_plans'); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
+  const [compPlanTombstones, setCompPlanTombstones] = useState<string[]>(() => {
+    try { const s = localStorage.getItem('audit_tombstones_compPlans'); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
   const [instOverrides, setInstOverrides] = useState<InstOverride[]>([]);
   const [procOverrides, setProcOverrides] = useState<ProcOverride[]>([]);
   const [auditorProfiles, setAuditorProfiles] = useState<AuditorProfile[]>([]);
@@ -475,10 +481,22 @@ export default function App() {
     const newInst: InstOverride[] = []; const newProc: ProcOverride[] = []; const newPwd: PwdOverride[] = []; const newAuditor: AuditorProfile[] = [];
     let newSecurity: SecuritySettings | null = null; let newSecId = ""; const newAttempts: LoginAttempt[] = [];
     let sessionCandidate: { username: string; sessionVersion: number } | null = null;
+    const newPlanTombstones: string[] = [];
+    const newCompPlanTombstones: string[] = [];
     rows.forEach(r => {
       const id = r.id || ""; const d = r.data || {};
       try {
         if (id === "audit_current_user" || id.startsWith("audit_session")) { /* IGNORED: login is per-device localStorage, shared row must never overwrite this device's login. */ return; }
+        if (id.startsWith("audit_tombstones_")) {
+          // Tombstone row: data = { kind: 'plan'|'compPlan', key: 'Topic||Year' }
+          const kind = d.kind; const key = d.key;
+          if (kind === "plan" && key) newPlanTombstones.push(key);
+          else if (kind === "compPlan" && key) newCompPlanTombstones.push(key);
+          else if (id.includes("_plan_") && d.key) newPlanTombstones.push(d.key);
+          else if (id.includes("_compPlan_") && d.key) newCompPlanTombstones.push(d.key);
+          hasData = true;
+          return;
+        }
         // Aggregate rows: one row whose data is the whole collection.
         if ((id === "audit_scores" || id === "audit_plans" || id === "audit_institutions" || id === "audit_procedures" || id === "audit_users") && Array.isArray(d)) {
           hasData = true;
@@ -527,9 +545,40 @@ export default function App() {
     };
     // FIXED V7: dedup plans by newest updated_at (sortedRows is oldest->newest), keep last value.
     // Do NOT OR active - intentional deactivation must stick. Newest row wins.
-    const dedupedPlans = (() => { const m = new Map<string, any>(); newPlans.forEach(v => { const k = `${v.topic}||${v.year}`; m.set(k, v); }); return [...m.values()]; })();
+    // Merge persistent tombstones from this batch into state + localStorage
+    if (newPlanTombstones.length) {
+      setPlanTombstones(prev => {
+        const merged = [...new Set([...prev, ...newPlanTombstones])];
+        try { localStorage.setItem('audit_tombstones_plans', JSON.stringify(merged)); } catch {}
+        return merged;
+      });
+    }
+    if (newCompPlanTombstones.length) {
+      setCompPlanTombstones(prev => {
+        const merged = [...new Set([...prev, ...newCompPlanTombstones])];
+        try { localStorage.setItem('audit_tombstones_compPlans', JSON.stringify(merged)); } catch {}
+        return merged;
+      });
+    }
+    // Clean old in-memory tombstones
+    const nowDelCheck = Date.now();
+    for (const [k, ts] of recentlyDeletedRef.current.entries()) { if (nowDelCheck - ts > 60000) recentlyDeletedRef.current.delete(k); }
+    const isRecentlyDeleted = (id: string, logicalKey: string) => {
+      return recentlyDeletedRef.current.has(id) || recentlyDeletedRef.current.has(logicalKey);
+    };
+    const allPlanTombstones = [...new Set([...planTombstones, ...newPlanTombstones])];
+    const allCompPlanTombstones = [...new Set([...compPlanTombstones, ...newCompPlanTombstones])];
+    const dedupedPlansRaw = (() => { const m = new Map<string, any>(); newPlans.forEach(v => { const k = `${v.topic}||${v.year}`; m.set(k, v); }); return [...m.values()]; })();
+    const dedupedCompPlansRaw = (() => { const m = new Map<string, any>(); newCompPlans.forEach(v => { const k = `${v.category}||${v.year}`; m.set(k, v); }); return [...m.values()]; })();
+    const dedupedPlans = dedupedPlansRaw.filter((v: any) => {
+      const key = `${v.topic}||${v.year}`;
+      return !isRecentlyDeleted(v.id, key) && !allPlanTombstones.includes(key);
+    });
+    const dedupedCompPlans = dedupedCompPlansRaw.filter((v: any) => {
+      const key = `${v.category}||${v.year}`;
+      return !isRecentlyDeleted(v.id, key) && !allCompPlanTombstones.includes(key);
+    });
     const dedupedScores = dedupBy(newScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
-    const dedupedCompPlans = (() => { const m = new Map<string, any>(); newCompPlans.forEach(v => { const k = `${v.category}||${v.year}`; m.set(k, v); }); return [...m.values()]; })();
     const dedupedCompScores = dedupBy(newCompScores, (s) => `${s.planId}||${s.wilayat}||${s.institution}||${s.period}`);
     // MERGE, never replace: a fetch that runs seconds after a save may not yet
     // include that just-saved row. Replacing would wipe it from the screen.
@@ -644,6 +693,12 @@ export default function App() {
     return forTopic.find(p => p.active) || forTopic[0];
   }, [plans, topic, planId]);
   useEffect(() => { if (activePlan && planId !== activePlan.id) setPlanId(activePlan.id); }, [activePlan]);
+  // Persistent tombstone filter: remove any plan whose key is in tombstones (survives logout/login)
+  useEffect(() => {
+    if (planTombstones.length === 0 && compPlanTombstones.length === 0) return;
+    setPlans(prev => prev.filter(p => !planTombstones.includes(`${p.topic}||${p.year}`)));
+    setCompPlans(prev => prev.filter(p => !compPlanTombstones.includes(`${p.category}||${p.year}`)));
+  }, [planTombstones, compPlanTombstones]);
   // 3 - Entering Plans page = fresh editor: clear any previously selected procedures/feedback
   // (so an old plan's O2 therapy etc. does not stay in the form)
   const prevTabRef = (globalThis as any).__prevTabRef || ((globalThis as any).__prevTabRef = { current: "" });
@@ -934,15 +989,38 @@ export default function App() {
     if (!window.confirm(`Delete Part 1 plan ${plan.topic} · ${plan.year}? Its scores will also be deleted.`)) return;
     lastSaveAtRef.current = Date.now();
     const delKey = `${plan.topic}||${plan.year}`;
+    // Persistent tombstone - survives logout/login
+    setPlanTombstones(prev => {
+      if (prev.includes(delKey)) return prev;
+      const next = [...prev, delKey];
+      try { localStorage.setItem('audit_tombstones_plans', JSON.stringify(next)); } catch {}
+      return next;
+    });
     recentlyDeletedRef.current.set(plan.id, Date.now());
     recentlyDeletedRef.current.set(delKey, Date.now());
-    setPlans(prev => {
-      const filtered = prev.filter(x => x.id !== plan.id);
-      // update backup immediately so offline reload doesn't restore it
-      try { saveLocalBackup({ plans: filtered, scores: scores.filter(s => s.planId !== plan.id && !(s.topic === plan.topic && s.year === plan.year)), compPlans, compScores, instOverrides, procOverrides, overrides, auditorProfiles, security }); } catch {}
-      return filtered;
-    });
-    setScores(prev => prev.filter(s => s.planId !== plan.id && !(s.topic === plan.topic && s.year === plan.year)));
+    // Remove from local state immediately (all matching keys, not just id)
+    setPlans(prev => prev.filter(x => `${x.topic}||${x.year}` !== delKey));
+    setScores(prev => prev.filter(s => !(s.topic === plan.topic && s.year === plan.year) && s.planId !== plan.id));
+    // Save tombstone to Supabase so other devices and future logins respect it
+    try {
+      const tombId = `audit_tombstones_plan_${plan.topic.replace(/\s+/g,'_')}_${plan.year}`;
+      await sbSave(tombId, { kind: "plan", key: delKey, topic: plan.topic, year: plan.year, deletedAt: new Date().toISOString() });
+    } catch {}
+    // Delete ALL matching plan rows from Supabase (covers duplicates with different ids)
+    try {
+      const all = await sbLoadAll();
+      if (all.ok) {
+        for (const r of all.rows) {
+          const id = r.id || ""; const d = r.data || {};
+          if (id.startsWith("audit_plans_") && d.topic === plan.topic && d.year === plan.year) {
+            try { await supabaseDelete(id); } catch {}
+          }
+          if (id.startsWith("audit_scores_") && d.topic === plan.topic && d.year === plan.year) {
+            try { await supabaseDelete(id); } catch {}
+          }
+        }
+      }
+    } catch {}
     try { await supabaseDelete(`audit_plans_${plan.id}`); } catch {}
     try { await api("records.delete", { collection: "audit_plans", id: plan.id }); } catch {}
     const stale = scores.filter(s => s.planId === plan.id || (s.topic === plan.topic && s.year === plan.year));
@@ -953,20 +1031,64 @@ export default function App() {
     if (!window.confirm(`Delete Part 2 plan ${plan.category} · ${plan.year}? Its scores will also be deleted.`)) return;
     lastSaveAtRef.current = Date.now();
     const delKey = `${plan.category}||${plan.year}`;
+    setCompPlanTombstones(prev => {
+      if (prev.includes(delKey)) return prev;
+      const next = [...prev, delKey];
+      try { localStorage.setItem('audit_tombstones_compPlans', JSON.stringify(next)); } catch {}
+      return next;
+    });
     recentlyDeletedRef.current.set(plan.id, Date.now());
     recentlyDeletedRef.current.set(delKey, Date.now());
-    setCompPlans(prev => {
-      const filtered = prev.filter(x => x.id !== plan.id);
-      try { saveLocalBackup({ plans, scores, compPlans: filtered, compScores: compScores.filter(s => s.planId !== plan.id && !(s.category === plan.category && s.year === plan.year)), instOverrides, procOverrides, overrides, auditorProfiles, security }); } catch {}
-      return filtered;
-    });
-    setCompScores(prev => prev.filter(s => s.planId !== plan.id && !(s.category === plan.category && s.year === plan.year)));
+    setCompPlans(prev => prev.filter(x => `${x.category}||${x.year}` !== delKey));
+    setCompScores(prev => prev.filter(s => !(s.category === plan.category && s.year === plan.year) && s.planId !== plan.id));
+    try {
+      const tombId = `audit_tombstones_compPlan_${plan.category.replace(/\s+/g,'_')}_${plan.year}`;
+      await sbSave(tombId, { kind: "compPlan", key: delKey, category: plan.category, year: plan.year, deletedAt: new Date().toISOString() });
+    } catch {}
+    try {
+      const all = await sbLoadAll();
+      if (all.ok) {
+        for (const r of all.rows) {
+          const id = r.id || ""; const d = r.data || {};
+          if ((id.startsWith("competency_plans_") || id.startsWith("audit_plans_")) && d.category === plan.category && d.year === plan.year) {
+            try { await supabaseDelete(id); } catch {}
+          }
+          if (id.startsWith("competency_scores_") && d.category === plan.category && d.year === plan.year) {
+            try { await supabaseDelete(id); } catch {}
+          }
+        }
+      }
+    } catch {}
     try { await supabaseDelete(`competency_plans_${plan.id}`); } catch {}
     try { await api("records.delete", { collection: "competency_plans", id: plan.id }); } catch {}
     const stale = compScores.filter(s => s.planId === plan.id || (s.category === plan.category && s.year === plan.year));
     for (const s of stale) { try { await supabaseDelete(`competency_scores_${s.id}`); } catch {} try { await api("records.delete", { collection: "competency_scores", id: s.id }); } catch {} }
     if (editingCompPlanId === plan.id) { setEditingCompPlanId(null); setCompProcSearch(Array(12).fill(undefined as any)); setOpenProcIdx(null); }
     setLiveToast(`Part 2 plan ${plan.category} · ${plan.year} deleted.`);
+  }
+  async function restoreAllDeletedPlans() {
+    if (!window.confirm(`Restore all deleted plans? This will clear tombstones and bring back default plans on next refresh.`)) return;
+    lastSaveAtRef.current = Date.now();
+    // Clear local state
+    setPlanTombstones([]);
+    setCompPlanTombstones([]);
+    try { localStorage.removeItem('audit_tombstones_plans'); } catch {}
+    try { localStorage.removeItem('audit_tombstones_compPlans'); } catch {}
+    // Delete tombstone rows from Supabase
+    try {
+      const all = await sbLoadAll();
+      if (all.ok) {
+        for (const r of all.rows) {
+          if ((r.id || "").startsWith("audit_tombstones_")) {
+            try { await supabaseDelete(r.id); } catch {}
+          }
+        }
+      }
+    } catch {}
+    // Restore defaults immediately
+    setPlans(DEFAULT_PLANS);
+    setCompPlans(DEFAULT_COMP_PLANS);
+    setLiveToast(`Deleted plans restored — defaults back. Refresh to reload from Supabase.`);
   }
   async function togglePart1PlanActive(plan: Plan) {
     const next = !plan.active;
@@ -1485,7 +1607,7 @@ export default function App() {
             </>}
 
             {tab === "Plans" && isAdmin && <section className="card p-4">
-              <h2 className="text-xl font-black">Plans</h2><p className="mt-1 text-sm text-[var(--muted)]">Create Monthly plans (Jan-Dec). Plans are saved to the shared audit_data table — only the changed plan row is upserted. {dbLabel}</p>
+              <div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-xl font-black">Plans</h2><p className="mt-1 text-sm text-[var(--muted)]">Create Monthly plans (Jan-Dec). Plans are saved to the shared audit_data table — only the changed plan row is upserted. {dbLabel}</p></div><button type="button" onClick={restoreAllDeletedPlans} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100">Restore deleted / Clear tombstones ({planTombstones.length + compPlanTombstones.length})</button></div>
               <div className="mt-4 grid gap-4 lg:grid-cols-2">
                 <form onSubmit={createPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">Create Part 1 plan</h3><label className="mt-3 block text-sm font-bold">Topic<select value={newPlan.topic} onChange={e => setNewPlan({ ...newPlan, topic: e.target.value })} className="mt-1 w-full">{TOPICS.map(t => <option key={t} value={t}>{t}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<select value={newPlan.year} onChange={e => setNewPlan({ ...newPlan, year: Number(e.target.value) })} className="mt-1 w-full">{Array.from({ length: 14 }, (_, k) => 2027 + k).map(y => <option key={y} value={y}>{y}</option>)}</select></label><button disabled={busy} className="mt-3 w-full rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">Create Part 1 plan</button></form>
                 <form onSubmit={createCompPlan} className="rounded-xl border p-4"><h3 className="font-extrabold">{editingCompPlanId ? "Edit Part 2 plan" : "Create Part 2 plan"}</h3><label className="mt-3 block text-sm font-bold">Category<select value={newCompPlan.category} onChange={e => { setNewCompPlan({ ...newCompPlan, category: e.target.value, procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] }); setCompProcSearch(Array(12).fill(undefined as any)); setOpenProcIdx(null); }} className="mt-1 w-full">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Year<select value={newCompPlan.year} onChange={e => { setNewCompPlan({ ...newCompPlan, year: Number(e.target.value), procedures: Array(12).fill(null) as (string | null)[], feedback: Array(12).fill(false) as boolean[] }); setCompProcSearch(Array(12).fill(undefined as any)); setOpenProcIdx(null); }} className="mt-1 w-full">{Array.from({ length: 14 }, (_, k) => 2027 + k).map(y => <option key={y} value={y}>{y}</option>)}</select></label><div className="mt-4 space-y-2"><p className="text-xs font-bold uppercase text-[var(--muted)]">Month by month — tap to open, type to filter inside the list</p>{MONTHS.map((m, i) => {

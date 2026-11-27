@@ -144,6 +144,88 @@ function buildZip(files: ZipFile[]): Uint8Array {
   push(eocd);
   return out;
 }
+
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function buildDocxBytes(category: string, year: number, seen: string[], rowMonths: number[][], periods: string[], logoDataUrl?: string) {
+  const escapeXml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+  const tableRowsXml = seen.map((proc, r) => {
+    const isFbRow = proc === "Obtaining Feedback";
+    const isSkipRow = proc === "— Skipped —";
+    const procText = (isFbRow || isSkipRow) ? "" : escapeXml(displayProcedure(proc) || proc);
+    const serialCell = `<w:tc><w:tcPr><w:tcW w:w="600" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>${r + 1}</w:t></w:r></w:p></w:tc>`;
+    const procCell = `<w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:r><w:t>${procText}</w:t></w:r></w:p></w:tc>`;
+    const monthCells = periods.map((_, i) => {
+      const isPlanned = rowMonths[r].includes(i);
+      const shading = isPlanned ? `<w:shd w:val="clear" w:color="auto" w:fill="c9ead9"/>` : "";
+      let cellText = "";
+      if (isPlanned) {
+        if (isFbRow) cellText = "Obtaining feedback";
+        else if (isSkipRow) cellText = "Skipped";
+      }
+      return `<w:tc><w:tcPr><w:tcW w:w="800" w:type="dxa"/>${shading}<w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>${escapeXml(cellText)}</w:t></w:r></w:p></w:tc>`;
+    }).join("");
+    return `<w:tr>${serialCell}${procCell}${monthCells}</w:tr>`;
+  }).join("");
+
+  const headerRow = `<w:tr><w:trPr><w:tblHeader/></w:trPr>
+    <w:tc><w:tcPr><w:tcW w:w="600" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="0d6e6b"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>Serial</w:t></w:r></w:p></w:tc>
+    <w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="0d6e6b"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>Planned Procedures</w:t></w:r></w:p></w:tc>
+    ${periods.map(m => `<w:tc><w:tcPr><w:tcW w:w="800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="0d6e6b"/><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>${escapeXml(m)}</w:t></w:r></w:p></w:tc>`).join("")}
+  </w:tr>`;
+
+  // Logo handling for docx
+  let hasLogo = false;
+  let logoB64 = "";
+  let logoExt = "jpeg";
+  if (logoDataUrl && logoDataUrl.startsWith("data:")) {
+    const comma = logoDataUrl.indexOf(",");
+    if (comma > -1) {
+      const meta = logoDataUrl.substring(5, comma);
+      logoB64 = logoDataUrl.substring(comma + 1);
+      if (meta.includes("png")) logoExt = "png";
+      else if (meta.includes("jpeg") || meta.includes("jpg")) logoExt = "jpeg";
+      hasLogo = !!logoB64;
+    }
+  }
+
+  const logoPara = hasLogo ? `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="1828800" cy="1016000"/><wp:docPr id="1" name="MOH Logo"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="MOH Logo"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1828800" cy="1016000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>` : "";
+
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>
+    ${logoPara}
+    <w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:b/><w:sz w:val="26"/></w:rPr></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="26"/></w:rPr><w:t>Directorate General of Health Services - NBG</w:t></w:r></w:p>
+    <w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:b/><w:sz w:val="26"/></w:rPr></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="26"/></w:rPr><w:t>Nursing Service Department</w:t></w:r></w:p>
+    <w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:b/><w:sz w:val="30"/></w:rPr><w:spacing w:after="200"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="30"/></w:rPr><w:t>${escapeXml(category)} Competency Procedures plan ${year}</w:t></w:r></w:p>
+    <w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/><w:left w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/><w:right w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="7a8a88"/></w:tblBorders></w:tblPr><w:tblGrid>${["600","3000", ...periods.map(() => "800")].map(w => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>${headerRow}${tableRowsXml}</w:tbl><w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/></w:sectPr></w:body></w:document>`;
+
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`;
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+  const docRels = hasLogo ? `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.${logoExt}"/></Relationships>` : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults></w:styles>`;
+
+  const files: ZipFile[] = [
+    { name: "[Content_Types].xml", data: strToBytes(contentTypes) },
+    { name: "_rels/.rels", data: strToBytes(rels) },
+    { name: "word/_rels/document.xml.rels", data: strToBytes(docRels) },
+    { name: "word/document.xml", data: strToBytes(documentXml) },
+    { name: "word/styles.xml", data: strToBytes(styles) },
+  ];
+  if (hasLogo) {
+    try {
+      const imgBytes = base64ToBytes(logoB64);
+      files.push({ name: `word/media/image1.${logoExt}`, data: imgBytes });
+    } catch {}
+  }
+  return buildZip(files);
+}
+
 function sanitizeSheetName(name: string) { let s = name.replace(/[\\/*?:\[\]]/g, "_").slice(0, 31); if (!s) s = "Sheet"; return s; }
 function downloadXLSX(filename: string, sheets: { name: string, rows: string[][] }[]) {
   const safeSheets = sheets.map((sh, i) => ({ name: sanitizeSheetName(sh.name || `Sheet${i + 1}`), rows: sh.rows }));
@@ -889,53 +971,39 @@ export default function App() {
     activeCompPlan.periods.forEach((_, i) => { if (activeCompPlan.feedback?.[i]) fbMonths.push(i); else if (!activeCompPlan.procedures?.[i]) skipMonths.push(i); });
     if (fbMonths.length) { seen.push("Obtaining Feedback"); rowMonths.push(fbMonths); }
     if (skipMonths.length) { seen.push("— Skipped —"); rowMonths.push(skipMonths); }
-    const rows = seen.map((proc, r) => {
-      const isFbRow = proc === "Obtaining Feedback";
-      const isSkipRow = proc === "— Skipped —";
-      const procCell = (isFbRow || isSkipRow) ? "" : xmlEscape(displayProcedure(proc) || proc);
-      const monthCells = activeCompPlan.periods.map((_, i) => rowMonths[r].includes(i) ? `<td style="background:#c9ead9;">${isFbRow ? "Obtaining feedback" : isSkipRow ? "Skipped" : "&nbsp;"}</td>` : `<td>&nbsp;</td>`).join("");
-      return `<tr><td style="text-align:center;">${r + 1}</td><td style="text-align:left;">${procCell}</td>${monthCells}</tr>`;
-    }).join("");
-    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</title><style>@page WordSection1{size:29.7cm 21cm;mso-page-orientation:landscape;margin:1cm 1cm 1cm 1cm;} div.WordSection1{page:WordSection1;} body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#102a2c;} p{margin:4pt 0;} table{border-collapse:collapse;width:100%;font-size:9pt;} th,td{border:1pt solid #7a8a88;padding:4pt 5pt;text-align:center;vertical-align:middle;} th{background:#0d6e6b;color:#ffffff;font-weight:bold;} thead{display:table-header-group;} tr{page-break-inside:avoid;}</style></head><body><div class="WordSection1"><div style="text-align:center;"><p style="text-align:center;margin:0 0 6pt;"><img src="${MOH_LOGO_DATA_URL}" alt="Ministry of Health logo" style="height:72px;width:auto;" /></p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Directorate General of Health Services - NBG</p><p style="font-size:13pt;font-weight:bold;margin:2pt 0;">Nursing Service Department</p><p style="font-size:15pt;font-weight:bold;margin:4pt 0 10pt;">${xmlEscape(activeCompPlan.category)} Competency Procedures plan ${activeCompPlan.year}</p></div><table><thead><tr><th style="width:5%;">Serial Number</th><th style="width:22%;text-align:left;">Planned Procedures</th>${activeCompPlan.periods.map(m => `<th style="width:6.5%;">${m}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></body></html>`;
-    const fileName = `${activeCompPlan.category.replace(/\s+/g, "_")}_Competency_Procedures_plan_${activeCompPlan.year}.doc`;
-    const htmlContent = "\ufeff" + html;
+
+    const fileNameDocx = `${activeCompPlan.category.replace(/\s+/g, "_")}_Competency_Procedures_plan_${activeCompPlan.year}.docx`;
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
 
-    // iPhone 17 Pro Max fix: use Web Share API with File — this keeps the real file name instead of "unknown"
-    // On iOS 17+ Safari, navigator.share with files is the only way to get a .doc download with correct name
-    if (isIOS) {
-      try {
-        const blobForShare = new Blob([htmlContent], { type: "application/msword;charset=utf-8" });
-        const fileForShare = new File([blobForShare], fileName, { type: "application/msword" });
+    try {
+      // Always build real .docx with MOH logo embedded — works on desktop, Android, and iPhone 17 Pro Max
+      const zipBytes = buildDocxBytes(activeCompPlan.category, activeCompPlan.year, seen, rowMonths, activeCompPlan.periods, MOH_LOGO_DATA_URL);
+      const zipCopy: Uint8Array<ArrayBuffer> = new Uint8Array(zipBytes);
+      const blobDocx = new Blob([zipCopy.buffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+
+      if (isIOS) {
+        const fileDocx = new File([blobDocx], fileNameDocx, { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
         const nav: any = navigator as any;
-        if (nav.canShare && nav.canShare({ files: [fileForShare] }) && nav.share) {
-          await nav.share({ files: [fileForShare], title: fileName, text: fileName });
+        if (nav.canShare && nav.canShare({ files: [fileDocx] }) && nav.share) {
+          await nav.share({ files: [fileDocx], title: fileNameDocx, text: fileNameDocx });
           return;
         }
-      } catch (e) {
-        console.log("Web Share failed, fallback to blob open", e);
       }
-      // Fallback for iOS if share not supported: open HTML view in new tab — user can Share > Save to Files
-      try {
-        const viewBlob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
-        const viewUrl = URL.createObjectURL(viewBlob);
-        window.open(viewUrl, "_blank");
-        setTimeout(() => URL.revokeObjectURL(viewUrl), 8000);
-        return;
-      } catch {}
-    }
 
-    // Desktop / Android — normal download with octet-stream to force save
-    const downloadBlob = new Blob([htmlContent], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(downloadBlob);
-    const a = document.createElement("a");
-    a.style.display = "none";
-    a.href = url;
-    (a as any).download = fileName;
-    a.setAttribute("download", fileName);
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, 2500);
+      // Desktop / Android and iOS fallback: normal download
+      const urlDocx = URL.createObjectURL(blobDocx);
+      const a = document.createElement("a");
+      a.style.display = "none";
+      a.href = urlDocx;
+      (a as any).download = fileNameDocx;
+      a.setAttribute("download", fileNameDocx);
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(urlDocx); }, isIOS ? 6000 : 2500);
+    } catch (e) {
+      console.log("docx build failed", e);
+      alert("Could not build Word file. Please try again.");
+    }
   }
   async function createPlan(e: React.FormEvent) {
     e.preventDefault(); setBusy(true);

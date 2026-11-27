@@ -1189,7 +1189,22 @@ export default function App() {
       const value = { topic: newPlan.topic, year: newPlan.year, frequency: "Monthly", periods: [...MONTHS], active: true };
       const newId = `plan-${Date.now()}`;
       const newP: Plan = { id: newId, ...value };
+      const key = `${value.topic}||${value.year}`;
+      // If this key was previously deleted, clear its tombstone so it doesn't re-delete on refresh
+      setPlanTombstones(prev => {
+        if (!prev.includes(key)) return prev;
+        const next = prev.filter(k => k !== key);
+        try { localStorage.setItem('audit_tombstones_plans', JSON.stringify(next)); } catch {}
+        return next;
+      });
+      recentlyDeletedRef.current.delete(newId);
+      recentlyDeletedRef.current.delete(key);
+      try {
+        const tombId = `audit_tombstones_plan_${value.topic.replace(/\s+/g,'_')}_${value.year}`;
+        await supabaseDelete(tombId);
+      } catch {}
       setPlans(prev => [...prev.filter(p => !(p.topic === value.topic && p.year === value.year)), newP]);
+      lastSaveAtRef.current = Date.now();
       await syncSaveFirst(`audit_plans_${newId}`, { id: newId, ...value });
       try { await api("records.create", { collection: "audit_plans", value, idempotency_key: `plan-${newPlan.topic}-${newPlan.year}-${Date.now()}` }); } catch {}
       setLiveToast("Plan created and set as active."); setTopic(newPlan.topic);
@@ -1203,8 +1218,24 @@ export default function App() {
       const editing = !!editingCompPlanId;
       const newId = editing ? editingCompPlanId : `compplan-${Date.now()}`;
       const newP: CompPlan = { id: newId, ...value };
+      const key = `${value.category}||${value.year}`;
+      if (!editing) {
+        setCompPlanTombstones(prev => {
+          if (!prev.includes(key)) return prev;
+          const next = prev.filter(k => k !== key);
+          try { localStorage.setItem('audit_tombstones_compPlans', JSON.stringify(next)); } catch {}
+          return next;
+        });
+        recentlyDeletedRef.current.delete(newId);
+        recentlyDeletedRef.current.delete(key);
+        try {
+          const tombId = `audit_tombstones_compPlan_${value.category.replace(/\s+/g,'_')}_${value.year}`;
+          await supabaseDelete(tombId);
+        } catch {}
+      }
       if (editing) setCompPlans(prev => prev.map(p => p.id === newId ? newP : p));
       else setCompPlans(prev => [...prev.filter(p => !(p.category === value.category && p.year === value.year)), newP]);
+      lastSaveAtRef.current = Date.now();
       await syncSaveFirst(`competency_plans_${newId}`, { id: newId, ...value });
       try { if (editing) await api("records.replace", { collection: "competency_plans", id: newId, value }); else await api("records.create", { collection: "competency_plans", value, idempotency_key: `compplan-${newCompPlan.category}-${newCompPlan.year}-${Date.now()}` }); } catch {}
       if (editing) {

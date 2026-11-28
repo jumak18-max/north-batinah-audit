@@ -20,11 +20,11 @@ const DEFAULT_USERS: User[] = [
 ];
 const WILAYAT_ORDER = ["Suhar", "Saham", "Suwaiq", "Khaboorah", "Shinas", "Liwa"];
 const INSTITUTIONS: Record<string, string[]> = {
-  Suhar: ["Suhar EHC", "Al Uwaynat HC", "Falaj Al Qbail HC", "Multaqa HC", "Suhar MFC", "Traif HC", "Wadi Ahin HC", "Wadi Heebi Hospital", "Suhar RMC"],
-  Saham: ["Saham Hospital", "Saham Polyclinic", "Hafeet HC", "Ghuwaisah HC", "Wadi Bani Omar HC", "Saham RMC"],
-  Suwaiq: ["Suwaiq Hospital", "Suwaiq EHC", "Bidaya HC", "Khadhra HC", "Mashaiq HC", "Shireesa HC", "Tharmad HC", "Wadi Al Jahawer HC", "Suwaiq RMC"],
+  Suhar: ["Suhar EHC", "Al Uwaynat HC", "Falaj Al Qbail HC", "Multaqa HC", "Suhar MFC", "Traif HC", "Wadi Ahin HC", "Wadi Heebi Hospital", "Suhar RDC"],
+  Saham: ["Saham Hospital", "Saham Polyclinic", "Hafeet HC", "Ghuwaisah HC", "Wadi Bani Omar HC", "Saham RDC"],
+  Suwaiq: ["Suwaiq Hospital", "Suwaiq EHC", "Bidaya HC", "Khadhra HC", "Mashaiq HC", "Shireesa HC", "Tharmad HC", "Wadi Al Jahawer HC", "Suwaiq RDC"],
   Khaboorah: ["Khaboorah EHC", "Qasbia HC", "Wadi Hawasna Hospital", "Wadi Sarrami Hospital", "Wadi Shafan HC"],
-  Shinas: ["Shinas EHC", "Abu Baqra HC", "Shinas Labour Room", "Shinas RMC"],
+  Shinas: ["Shinas EHC", "Abu Baqra HC", "Shinas Labour Room", "Shinas RDC"],
   Liwa: ["Liwa HC", "Nabr HC", "Rahab HC"],
 };
 const TOPICS = ["Crash Cart", "Narcotics & Psychotropics", "Escorting Patients", "Death"];
@@ -275,11 +275,11 @@ const DEFAULT_COMP_PLANS: CompPlan[] = [
   { id: "default-comp-Labour Rooms", category: "Labour Rooms", year: 2027, frequency: "Monthly", periods: [...MONTHS], procedures: ["[LR] Vaginal Examination", "[LR] Vaginal Examination", "[LR] 2nd Stage of Labour", "[LR] 2nd Stage of Labour", null, "[LR] 3rd Stage of Labour", "[LR] 3rd Stage of Labour", "[LR] Episiotomy Incision, Repair", "[LR] Breast Feeding Assessment", "Checking FHS (fetal heart sound)", null, null], feedback: [false, false, false, false, true, false, false, false, false, false, false, false], active: true },
 ];
 const DEFAULT_SCORES: Score[] = [
-  { id: "default-score-1", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Jan", score: "95", comment: "Crash cart checklist complete.", auditorName: "Juma Al Maezouqi", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
-  { id: "default-score-2", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Feb", score: "98", comment: "Minor labelling fixed on site.", auditorName: "Juma Al Maezouqi", auditedAt: "2026-11-22T04:10:00.000Z", history: [] },
+  { id: "default-score-1", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Jan", score: "95", comment: "Crash cart checklist complete.", auditorName: "Salim Al Mamari", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
+  { id: "default-score-2", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Feb", score: "98", comment: "Minor labelling fixed on site.", auditorName: "Salim Al Mamari", auditedAt: "2026-11-22T04:10:00.000Z", history: [] },
 ];
 const DEFAULT_COMP_SCORES: CompScore[] = [
-  { id: "default-comp-score-1", planId: "default-comp-General Nursing", wilayat: "Khaboorah", institution: "Khaboorah EHC", category: "General Nursing", year: 2027, period: "Jan", procedure: "Neourological assessment", score: "92", comment: "Good technique.", auditorName: "Juma Al Maezouqi", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
+  { id: "default-comp-score-1", planId: "default-comp-General Nursing", wilayat: "Khaboorah", institution: "Khaboorah EHC", category: "General Nursing", year: 2027, period: "Jan", procedure: "Neourological assessment", score: "92", comment: "Good technique.", auditorName: "Salim Al Mamari", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
 ];
 
 async function api(action: string, args: any) {
@@ -1485,7 +1485,12 @@ export default function App() {
                 <h2 className="text-xl font-extrabold">Sign in</h2><p className="text-sm text-[var(--muted)]">Choose account and type password.</p>
                 <form onSubmit={login} className="mt-4 space-y-3">
                   <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="username" /></label>
-                  <label className="block text-sm font-bold">Password<div className="relative mt-1"><input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} className="w-full pr-12" autoComplete="current-password" /><button type="button" onClick={() => setShowPassword(p => !p)} className="absolute inset-y-0 right-0 w-10 flex items-center justify-center text-[18px] leading-none" aria-label={showPassword ? "Hide password" : "Show password"} tabIndex={-1}>{showPassword ? "🙈" : "👁️"}</button></div></label>
+                  <label className="block text-sm font-bold">Password
+  <div className="mt-1 flex items-center rounded-xl border border-black/10 bg-white focus-within:ring-2 focus-within:ring-teal-600 overflow-hidden">
+    <input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} className="flex-1 border-0 outline-none bg-transparent px-3 py-2.5 text-[15px]" autoComplete="current-password" />
+    <button type="button" onClick={() => setShowPassword(p => !p)} className="w-11 h-10 shrink-0 flex items-center justify-center text-[18px] bg-transparent hover:bg-black/5 active:bg-black/10" aria-label={showPassword ? "Hide password" : "Show password"} tabIndex={-1}>{showPassword ? "🙈" : "👁️"}</button>
+  </div>
+</label>
                   {security.locked && <label className="block text-sm font-bold">Recovery Code <span className="text-red-600">* Required for Master Unlock</span><input type="password" value={recoveryInput} onChange={e => setRecoveryInput(e.target.value)} className="mt-1 w-full" placeholder="Recovery Code set by Master" autoComplete="off" /></label>}
                   {security.accessCodeEnabled && <label className="block text-sm font-bold">Directorate Access Code <span className="text-red-600">* Required</span><input type="password" value={accessCodeInput} onChange={e => setAccessCodeInput(e.target.value)} className="mt-1 w-full" placeholder="Directorate Access Code" autoComplete="off" /></label>}
                   {loginError && <p className="rounded-lg bg-[var(--red)] p-2 text-sm font-semibold">{loginError}</p>}
@@ -1760,7 +1765,7 @@ export default function App() {
                         <input
                           value={auditorNameInput}
                           onChange={e => setAuditorNameInput(e.target.value)}
-                          placeholder="e.g. Juma Al Maezouqi"
+                          placeholder="e.g. Salim Al Mamari"
                           className={`mt-1 w-full ${!isNameValid(auditorNameInput) && auditorNameInput !== "" ? "border-red-500" : ""}`}
                           style={{ fontSize: 16, minHeight: 48 }}
                         />

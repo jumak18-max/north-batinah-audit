@@ -20,9 +20,9 @@ const DEFAULT_USERS: User[] = [
 ];
 const WILAYAT_ORDER = ["Suhar", "Saham", "Suwaiq", "Khaboorah", "Shinas", "Liwa"];
 const INSTITUTIONS: Record<string, string[]> = {
-  Suhar: ["Suhar EHC", "Al Uwaynat HC", "Falaj Al Qbail HC", "Multaqa HC", "Suhar MFC", "Traif HC", "Wadi Ahin HC", "Wadi Heebi Hospital", "Suhar RDC"],
-  Saham: ["Saham Hospital", "Saham Polyclinic", "Hafeet HC", "Ghuwaisah HC", "Wadi Bani Omar HC", "Saham RDC"],
-  Suwaiq: ["Suwaiq Hospital", "Suwaiq EHC", "Bidaya HC", "Khadhra HC", "Mashaiq HC", "Shireesa HC", "Tharmad HC", "Wadi Al Jahawer HC", "Suwaiq RDC"],
+  Suhar: ["Suhar EHC", "Al Uwaynat HC", "Falaj Al Qbail HC", "Multaqa HC", "Suhar MFC", "Traif HC", "Wadi Ahin HC", "Wadi Heebi Hospital", "Suhar RMC"],
+  Saham: ["Saham Hospital", "Saham Polyclinic", "Hafeet HC", "Ghuwaisah HC", "Wadi Bani Omar HC", "Saham RMC"],
+  Suwaiq: ["Suwaiq Hospital", "Suwaiq EHC", "Bidaya HC", "Khadhra HC", "Mashaiq HC", "Shireesa HC", "Tharmad HC", "Wadi Al Jahawer HC", "Suwaiq RMC"],
   Khaboorah: ["Khaboorah EHC", "Qasbia HC", "Wadi Hawasna Hospital", "Wadi Sarrami Hospital", "Wadi Shafan HC"],
   Shinas: ["Shinas EHC", "Abu Baqra HC", "Shinas Labour Room", "Shinas RDC"],
   Liwa: ["Liwa HC", "Nabr HC", "Rahab HC"],

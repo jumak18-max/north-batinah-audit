@@ -318,7 +318,6 @@ export default function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [part, setPart] = useState<"1" | "2">("1");
   const [tab, setTab] = useState("Dashboard");

@@ -34,7 +34,13 @@ MONTHS.forEach((m, i) => { MONTH_INDEX[m] = i; MONTH_INDEX[m.toLowerCase()] = i;
 const CATEGORIES = ["General Nursing", "Renal Medicine Center", "Labour Rooms"] as const;
 
 function cleanInstitutionName(raw: string, wilayat?: string): string {
-  let s = (raw || "").trim(); let changed = true;
+  let s = (raw || "").trim();
+  if (s === "Saham Hospital LR") return "Saham Hospital";
+  if (s === "Suwaiq Hospital LR") return "Suwaiq Hospital";
+  if (s === "Shinas RDC") return "Shinas RMC";
+  if (s.endsWith("_Saham Hospital LR")) return "Saham Hospital";
+  if (s.endsWith("_Suwaiq Hospital LR")) return "Suwaiq Hospital";
+  if (s.endsWith("_Shinas RDC")) return "Shinas RMC"; let changed = true;
   while (changed) { changed = false; const idx = s.indexOf("_"); if (idx > 0) { const prefix = s.slice(0, idx).trim(); const isWilayat = wilayat ? prefix.toLowerCase() === wilayat.toLowerCase() : WILAYAT_ORDER.some(w => w.toLowerCase() === prefix.toLowerCase()); if (isWilayat) { s = s.slice(idx + 1).trim(); changed = true; } } }
   return s;
 }
@@ -434,9 +440,9 @@ export default function App() {
     };
     Object.entries(INSTITUTIONS).forEach(([w, list]) => list.forEach(inst => setEntry(w, inst, ["Part 1"])));
     const COMP_INSTITUTIONS_RAW: Record<string, string[]> = {
-      "General Nursing": ["Khaboorah_Khaboorah EHC", "Khaboorah_Qasbia HC", "Khaboorah_Wadi Hawasna Hospital", "Khaboorah_Wadi Sarrami Hospital", "Khaboorah_Wadi Shafan HC", "Liwa_Liwa HC", "Liwa_Nabr HC", "Liwa_Rahab HC", "Saham_Saham Polyclinic", "Saham_Ghuwaisah HC", "Saham_Hafeet HC", "Saham_Wadi Bani Omar HC", "Shinas_Abu Baqra HC", "Shinas_Shinas EHC", "Shinas_Shinas RDC", "Suhar_Al Uwaynat HC", "Suhar_Falaj Al Qbail HC", "Suhar_Multaqa HC", "Suhar_Suhar EHC", "Suhar_Suhar MFC", "Suhar_Traif HC", "Suhar_Wadi Ahin HC", "Suhar_Wadi Heebi Hospital", "Suwaiq_Bidaya HC", "Suwaiq_Khadhra HC", "Suwaiq_Mashaiq HC", "Suwaiq_Shireesa HC", "Suwaiq_Suwaiq EHC", "Suwaiq_Tharmad HC", "Suwaiq_Wadi Al Jahawer HC"],
-      "Renal Medicine Center": ["Suhar_Suhar RMC", "Saham_Saham RMC", "Suwaiq_Suwaiq RMC"],
-      "Labour Rooms": ["Saham_Saham Hospital LR", "Shinas_Shinas LR", "Suwaiq_Suwaiq Hospital LR"],
+      "General Nursing": ["Khaboorah_Khaboorah EHC", "Khaboorah_Qasbia HC", "Khaboorah_Wadi Hawasna Hospital", "Khaboorah_Wadi Sarrami Hospital", "Khaboorah_Wadi Shafan HC", "Liwa_Liwa HC", "Liwa_Nabr HC", "Liwa_Rahab HC", "Saham_Saham Hospital", "Saham_Saham Polyclinic", "Saham_Ghuwaisah HC", "Saham_Hafeet HC", "Saham_Wadi Bani Omar HC", "Shinas_Abu Baqra HC", "Shinas_Shinas EHC", "Suhar_Al Uwaynat HC", "Suhar_Falaj Al Qbail HC", "Suhar_Multaqa HC", "Suhar_Suhar EHC", "Suhar_Suhar MFC", "Suhar_Traif HC", "Suhar_Wadi Ahin HC", "Suhar_Wadi Heebi Hospital", "Suwaiq_Suwaiq Hospital", "Suwaiq_Bidaya HC", "Suwaiq_Khadhra HC", "Suwaiq_Mashaiq HC", "Suwaiq_Shireesa HC", "Suwaiq_Suwaiq EHC", "Suwaiq_Tharmad HC", "Suwaiq_Wadi Al Jahawer HC"],
+      "Renal Medicine Center": ["Suhar_Suhar RMC", "Saham_Saham RMC", "Suwaiq_Suwaiq RMC", "Shinas_Shinas RMC"],
+      "Labour Rooms": ["Saham_Saham Hospital", "Shinas_Shinas LR", "Suwaiq_Suwaiq Hospital"],
     };
     Object.entries(COMP_INSTITUTIONS_RAW).forEach(([cat, list]) => list.forEach(s => { const i = s.indexOf("_"); setEntry(s.slice(0, i), s.slice(i + 1), [cat]); }));
     instOverrides.forEach(rec => {
@@ -502,7 +508,11 @@ export default function App() {
           return;
         }
         if (id.includes("institution_assignments_")) {
-          const wil = d.wilayat; const inst = d.institution; const yr = d.year;
+          const wil = d.wilayat; let inst = d.institution; const yr = d.year;
+          // Legacy rename: Saham Hospital LR -> Saham Hospital, Suwaiq Hospital LR -> Suwaiq Hospital, Shinas RDC -> Shinas RMC
+          if (inst === "Saham Hospital LR") inst = "Saham Hospital";
+          if (inst === "Suwaiq Hospital LR") inst = "Suwaiq Hospital";
+          if (inst === "Shinas RDC") inst = "Shinas RMC";
           if (wil && inst && yr) {
             const k = `${wil}||${inst}||${yr}`;
             newYearAssign[k] = Array.isArray(d.assignments) ? d.assignments : [];

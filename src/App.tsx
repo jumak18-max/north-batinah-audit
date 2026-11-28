@@ -9,29 +9,29 @@ import { isSupabaseConfigured, supabaseLoadAll, supabaseUpsert, supabaseDelete, 
 type Role = "Master" | "Admin" | "Wilayat";
 type User = { username: string; password: string; role: Role; wilayat: string; label: string };
 const DEFAULT_USERS: User[] = [
-  { username: "master", password: "Masterin123", role: "Master", wilayat: "All Wilayats", label: "Master" },
-  { username: "admin", password: "admin123", role: "Admin", wilayat: "All Wilayats", label: "Admin — Nursing Service Department" },
-  { username: "suhar", password: "suhar123", role: "Wilayat", wilayat: "Suhar", label: "Suhar" },
-  { username: "saham", password: "saham123", role: "Wilayat", wilayat: "Saham", label: "Saham" },
-  { username: "khaboorah", password: "khaboorah123", role: "Wilayat", wilayat: "Khaboorah", label: "Khaboorah" },
-  { username: "suwaiq", password: "suwaiq123", role: "Wilayat", wilayat: "Suwaiq", label: "Suwaiq" },
-  { username: "shinas", password: "shinas123", role: "Wilayat", wilayat: "Shinas", label: "Shinas" },
-  { username: "liwa", password: "liwa123", role: "Wilayat", wilayat: "Liwa", label: "Liwa" },
+  { username: "Mster", password: "Masterin123", role: "Master", wilayat: "All Wilayats", label: "Master" },
+  { username: "Admin", password: "nsd/35", role: "Admin", wilayat: "All Wilayats", label: "Admin — Nursing Service Department" },
+  { username: "Suhar", password: "shr&678", role: "Wilayat", wilayat: "Suhar", label: "Suhar" },
+  { username: "Saham", password: "shm:505", role: "Wilayat", wilayat: "Saham", label: "Saham" },
+  { username: "Khaboorah", password: "kbh*789", role: "Wilayat", wilayat: "Khaboorah", label: "Khaboorah" },
+  { username: "Suwaiq", password: "swq$696", role: "Wilayat", wilayat: "Suwaiq", label: "Suwaiq" },
+  { username: "Shinas", password: "sns#404", role: "Wilayat", wilayat: "Shinas", label: "Shinas" },
+  { username: "Liwa", password: "lwa@919", role: "Wilayat", wilayat: "Liwa", label: "Liwa" },
 ];
 const WILAYAT_ORDER = ["Suhar", "Saham", "Suwaiq", "Khaboorah", "Shinas", "Liwa"];
 const INSTITUTIONS: Record<string, string[]> = {
-  Suhar: ["Suhar EHC", "Al Uwaynat HC", "Falaj Al Qbail HC", "Multaqa HC", "Suhar MFC", "Traif HC", "Wadi Ahin HC", "Wadi Heebi Hospital", "Suhar RDC"],
-  Saham: ["Saham Hospital", "Saham Polyclinic", "Hafeet HC", "Ghuwaisah HC", "Wadi Bani Omar HC", "Saham RDC"],
-  Suwaiq: ["Suwaiq Hospital", "Suwaiq EHC", "Bidaya HC", "Khadhra HC", "Mashaiq HC", "Shireesa HC", "Tharmad HC", "Wadi Al Jahawer HC", "Suwaiq RDC"],
+  Suhar: ["Suhar EHC", "Al Uwaynat HC", "Falaj Al Qbail HC", "Multaqa HC", "Suhar MFC", "Traif HC", "Wadi Ahin HC", "Wadi Heebi Hospital", "Suhar RMC"],
+  Saham: ["Saham Hospital", "Saham Polyclinic", "Hafeet HC", "Ghuwaisah HC", "Wadi Bani Omar HC", "Saham RMC"],
+  Suwaiq: ["Suwaiq Hospital", "Suwaiq EHC", "Bidaya HC", "Khadhra HC", "Mashaiq HC", "Shireesa HC", "Tharmad HC", "Wadi Al Jahawer HC", "Suwaiq RMC"],
   Khaboorah: ["Khaboorah EHC", "Qasbia HC", "Wadi Hawasna Hospital", "Wadi Sarrami Hospital", "Wadi Shafan HC"],
-  Shinas: ["Shinas EHC", "Abu Baqra HC", "Shinas Labour Room", "Shinas RDC"],
+  Shinas: ["Shinas EHC", "Abu Baqra HC", "Shinas Labour Room", "Shinas RMC"],
   Liwa: ["Liwa HC", "Nabr HC", "Rahab HC"],
 };
 const TOPICS = ["Crash Cart", "Narcotics & Psychotropics", "Escorting Patients", "Death"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTH_INDEX: Record<string, number> = {};
 MONTHS.forEach((m, i) => { MONTH_INDEX[m] = i; MONTH_INDEX[m.toLowerCase()] = i; });
-const CATEGORIES = ["General Nursing", "Renal Medicine Center", "Labour Rooms"] as const;
+const CATEGORIES = ["General Nursing", "Renal Medicine Centers", "Labour Rooms"] as const;
 
 function cleanInstitutionName(raw: string, wilayat?: string): string {
   let s = (raw || "").trim(); let changed = true;
@@ -271,15 +271,15 @@ function downloadXLSX(filename: string, sheets: { name: string, rows: string[][]
 const DEFAULT_PLANS: Plan[] = TOPICS.map(t => ({ id: `default-plan-${t}`, topic: t, year: 2027, frequency: "Monthly", periods: [...MONTHS], active: true }));
 const DEFAULT_COMP_PLANS: CompPlan[] = [
   { id: "default-comp-General Nursing", category: "General Nursing", year: 2027, frequency: "Monthly", periods: [...MONTHS], procedures: ["Neourological assessment", "Neourological assessment", "Neourological assessment", "Urinary Catheterization (Male)", "Urinary Catheterization (Male)", null, "IV Cannulation Insertion", "IV Cannulation Insertion", "IV Fluid Administration", "Cast Application (Plaster)", null, null], feedback: [false, false, false, false, false, true, false, false, false, false, false, false], active: true },
-  { id: "default-comp-Renal Medicine Center", category: "Renal Medicine Center", year: 2027, frequency: "Monthly", periods: [...MONTHS], procedures: ["[RMC] Pre Dialysis assessment of Haemodialysis Patient", "[RMC] Pre Dialysis assessment of Haemodialysis Patient", "[RMC] Priming Dialysis Machine", "[RMC] Priming Dialysis Machine", null, "[RMC] Commencing patient with Permanent access to HD Machine", "[RMC] Commencing patient with Permanent access to HD Machine", "[RMC] Post Dialysis assessment of Haemodialysis Patient", "[RMC] Disconnecting patient with Permanent access from HD Machine", null, "[RMC] Management of hypotension during dialysis", null], feedback: [false, false, false, false, true, false, false, false, false, false, false, false], active: true },
+  { id: "default-comp-Renal Medicine Centers", category: "Renal Medicine Centers", year: 2027, frequency: "Monthly", periods: [...MONTHS], procedures: ["[RMC] Pre Dialysis assessment of Haemodialysis Patient", "[RMC] Pre Dialysis assessment of Haemodialysis Patient", "[RMC] Priming Dialysis Machine", "[RMC] Priming Dialysis Machine", null, "[RMC] Commencing patient with Permanent access to HD Machine", "[RMC] Commencing patient with Permanent access to HD Machine", "[RMC] Post Dialysis assessment of Haemodialysis Patient", "[RMC] Disconnecting patient with Permanent access from HD Machine", null, "[RMC] Management of hypotension during dialysis", null], feedback: [false, false, false, false, true, false, false, false, false, false, false, false], active: true },
   { id: "default-comp-Labour Rooms", category: "Labour Rooms", year: 2027, frequency: "Monthly", periods: [...MONTHS], procedures: ["[LR] Vaginal Examination", "[LR] Vaginal Examination", "[LR] 2nd Stage of Labour", "[LR] 2nd Stage of Labour", null, "[LR] 3rd Stage of Labour", "[LR] 3rd Stage of Labour", "[LR] Episiotomy Incision, Repair", "[LR] Breast Feeding Assessment", "Checking FHS (fetal heart sound)", null, null], feedback: [false, false, false, false, true, false, false, false, false, false, false, false], active: true },
 ];
 const DEFAULT_SCORES: Score[] = [
-  { id: "default-score-1", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Jan", score: "95", comment: "Crash cart checklist complete.", auditorName: "Salim Al Mamari", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
-  { id: "default-score-2", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Feb", score: "98", comment: "Minor labelling fixed on site.", auditorName: "Salim Al Mamari", auditedAt: "2026-11-22T04:10:00.000Z", history: [] },
+  { id: "default-score-1", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Jan", score: "95", comment: "Crash cart checklist complete.", auditorName: "Juma Al Marzouqi", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
+  { id: "default-score-2", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Feb", score: "98", comment: "Minor labelling fixed on site.", auditorName: "Juma Al Marzouqi", auditedAt: "2026-11-22T04:10:00.000Z", history: [] },
 ];
 const DEFAULT_COMP_SCORES: CompScore[] = [
-  { id: "default-comp-score-1", planId: "default-comp-General Nursing", wilayat: "Khaboorah", institution: "Khaboorah EHC", category: "General Nursing", year: 2027, period: "Jan", procedure: "Neourological assessment", score: "92", comment: "Good technique.", auditorName: "Salim Al Mamari", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
+  { id: "default-comp-score-1", planId: "default-comp-General Nursing", wilayat: "Khaboorah", institution: "Khaboorah EHC", category: "General Nursing", year: 2027, period: "Jan", procedure: "Neourological assessment", score: "92", comment: "Good technique.", auditorName: "Juma Al Marzouqi", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
 ];
 
 async function api(action: string, args: any) {
@@ -435,7 +435,7 @@ export default function App() {
     Object.entries(INSTITUTIONS).forEach(([w, list]) => list.forEach(inst => setEntry(w, inst, ["Part 1"])));
     const COMP_INSTITUTIONS_RAW: Record<string, string[]> = {
       "General Nursing": ["Khaboorah_Khaboorah EHC", "Khaboorah_Qasbia HC", "Khaboorah_Wadi Hawasna Hospital", "Khaboorah_Wadi Sarrami Hospital", "Khaboorah_Wadi Shafan HC", "Liwa_Liwa HC", "Liwa_Nabr HC", "Liwa_Rahab HC", "Saham_Saham Hospital", "Saham_Saham Polyclinic", "Saham_Ghuwaisah HC", "Saham_Hafeet HC", "Saham_Wadi Bani Omar HC", "Shinas_Abu Baqra HC", "Shinas_Shinas EHC", "Suhar_Al Uwaynat HC", "Suhar_Falaj Al Qbail HC", "Suhar_Multaqa HC", "Suhar_Suhar EHC", "Suhar_Suhar MFC", "Suhar_Traif HC", "Suhar_Wadi Ahin HC", "Suhar_Wadi Heebi Hospital", "Suwaiq_Suwaiq Hospital", "Suwaiq_Bidaya HC", "Suwaiq_Khadhra HC", "Suwaiq_Mashaiq HC", "Suwaiq_Shireesa HC", "Suwaiq_Suwaiq EHC", "Suwaiq_Tharmad HC", "Suwaiq_Wadi Al Jahawer HC"],
-      "Renal Medicine Center": ["Suhar_Suhar RMC", "Saham_Saham RMC", "Suwaiq_Suwaiq RMC", "Shinas_Shinas RMC"],
+      "Renal Medicine Centers": ["Suhar_Suhar RMC", "Saham_Saham RMC", "Suwaiq_Suwaiq RMC", "Shinas_Shinas RMC"],
       "Labour Rooms": ["Saham_Saham Hospital", "Shinas_Shinas LR", "Suwaiq_Suwaiq Hospital"],
     };
     Object.entries(COMP_INSTITUTIONS_RAW).forEach(([cat, list]) => list.forEach(s => { const i = s.indexOf("_"); setEntry(s.slice(0, i), s.slice(i + 1), [cat]); }));
@@ -1477,12 +1477,13 @@ export default function App() {
                   <div className="rounded-xl bg-white/15 p-3"><div className="text-2xl font-black">4</div><div className="text-xs">Topics</div></div>
                 </div>
                 <div className="mt-6 text-sm text-white/85"><strong>Wilayats:</strong> {WILAYAT_ORDER.map(w => `${w} (${(effPart1[w] || []).length})`).join(" · ")}</div>
-                <div className="mt-4 rounded-xl bg-white/10 p-3 text-sm"><strong>Part 2 — Competency Procedures:</strong> General Nursing, Renal Medicine Center, Labour Rooms. Same logins, separate plans and scores.</div>
-                <p className="mt-auto pt-6 text-center text-sm font-bold text-white">Brought to you by: Juma Al Marzouqi [Saham Hospital]</p>
+                <div className="mt-4 rounded-xl bg-white/10 p-3 text-sm"><strong>Part 2 — Competency Procedures:</strong> General Nursing, Renal Medicine Centers, Labour Rooms. Same logins, separate plans and scores.</div>
+                <p className="mt-auto pt-6 text-center text-sm font-bold text-white">Brought to you by:</p>
+                <p className="mt-auto pt-6 text-center text-sm font-bold text-white">Juma Al Marzouqi [Saham Hospital]</p>
                 <p className="mt-3 text-center text-xs text-white/70">{isSupabaseConfigured ? "Live • Supabase • Shared Database" : "Local mode — add VITE_SUPABASE env to enable cross-PC sync"}</p>
               </div>
               <div className="p-5 sm:p-7">
-                <h2 className="text-xl font-extrabold">Sign in</h2><p className="text-sm text-[var(--muted)]">Choose account and type password.</p>
+                <h2 className="text-xl font-extrabold">Sign in</h2><p className="text-sm text-[var(--muted)]">Your account and password.</p>
                 <form onSubmit={login} className="mt-4 space-y-3">
                   <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="username" /></label>
                   <label className="block text-sm font-bold">Password
@@ -1525,11 +1526,11 @@ export default function App() {
                     const k = `${e.wilayat}||${e.institution}||${assignYear}`;
                     const cur = yearAssignments[k] !== undefined ? yearAssignments[k] : e.assignments;
                     const isCustom = k in yearAssignments;
-                    return <div key={k} className="rounded-lg border p-2"><div className="flex justify-between"><span className="text-sm font-bold">{e.institution} <span className="text-xs font-normal text-[var(--muted)]">· {e.wilayat} {isCustom ? "· Year-specific" : "· Permanent"}</span></span></div><div className="mt-2 flex flex-wrap gap-2">{["Part 1","General Nursing","Renal Medicine Center","Labour Rooms"].map(cat => <label key={cat} className="flex items-center gap-1 text-xs font-semibold"><input type="checkbox" checked={cur.includes(cat)} onChange={() => { const nxt = cur.includes(cat) ? cur.filter(c => c !== cat) : [...cur, cat]; setYearAssignments(p => ({ ...p, [k]: nxt })); }} className="w-auto" /> {cat}</label>)}</div></div>;
+                    return <div key={k} className="rounded-lg border p-2"><div className="flex justify-between"><span className="text-sm font-bold">{e.institution} <span className="text-xs font-normal text-[var(--muted)]">· {e.wilayat} {isCustom ? "· Year-specific" : "· Permanent"}</span></span></div><div className="mt-2 flex flex-wrap gap-2">{["Part 1","General Nursing","Renal Medicine Centers","Labour Rooms"].map(cat => <label key={cat} className="flex items-center gap-1 text-xs font-semibold"><input type="checkbox" checked={cur.includes(cat)} onChange={() => { const nxt = cur.includes(cat) ? cur.filter(c => c !== cat) : [...cur, cat]; setYearAssignments(p => ({ ...p, [k]: nxt })); }} className="w-auto" /> {cat}</label>)}</div></div>;
                   })}</div>
                 </div>
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                  <form onSubmit={saveInstitution} className="card p-4"><h3 className="font-extrabold">{editingInst ? "Edit institution" : "Add institution"}</h3><label className="mt-3 block text-sm font-bold">Wilayat<select value={instForm.wilayat} onChange={e => setInstForm({ ...instForm, wilayat: e.target.value })} className="mt-1 w-full">{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Institution name<input value={instForm.name} onChange={e => setInstForm({ ...instForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. Khaboorah EHC" /></label><fieldset className="mt-3"><legend className="text-sm font-bold">Assignments (Permanent — applies to all years unless overridden in Assignments by Year manager above)</legend>{["Part 1", "General Nursing", "Renal Medicine Center", "Labour Rooms"].map(a => <label key={a} className="mt-2 flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={instForm.assignments.includes(a)} onChange={() => toggleInstAssignment(a)} className="w-auto" /> {a}</label>)}</fieldset>{instMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{instMsg}</p>}<div className="mt-4 flex gap-2"><button disabled={busy} className="flex-1 rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingInst ? "Save changes" : "Add institution"}</button>{editingInst && <button type="button" onClick={() => { setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"] }); }} className="rounded-lg border px-3 py-2 font-bold">Cancel</button>}</div></form>
+                  <form onSubmit={saveInstitution} className="card p-4"><h3 className="font-extrabold">{editingInst ? "Edit institution" : "Add institution"}</h3><label className="mt-3 block text-sm font-bold">Wilayat<select value={instForm.wilayat} onChange={e => setInstForm({ ...instForm, wilayat: e.target.value })} className="mt-1 w-full">{WILAYAT_ORDER.map(w => <option key={w} value={w}>{w}</option>)}</select></label><label className="mt-3 block text-sm font-bold">Institution name<input value={instForm.name} onChange={e => setInstForm({ ...instForm, name: e.target.value })} className="mt-1 w-full" placeholder="e.g. Khaboorah EHC" /></label><fieldset className="mt-3"><legend className="text-sm font-bold">Assignments (Permanent — applies to all years unless overridden in Assignments by Year manager above)</legend>{["Part 1", "General Nursing", "Renal Medicine Centers", "Labour Rooms"].map(a => <label key={a} className="mt-2 flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={instForm.assignments.includes(a)} onChange={() => toggleInstAssignment(a)} className="w-auto" /> {a}</label>)}</fieldset>{instMsg && <p className="mt-3 rounded bg-[var(--surface2)] p-2 text-sm font-semibold">{instMsg}</p>}<div className="mt-4 flex gap-2"><button disabled={busy} className="flex-1 rounded-lg bg-[var(--teal)] py-2.5 font-bold text-white disabled:opacity-50">{editingInst ? "Save changes" : "Add institution"}</button>{editingInst && <button type="button" onClick={() => { setEditingInst(null); setInstForm({ wilayat: "Suhar", name: "", assignments: ["Part 1"] }); }} className="rounded-lg border px-3 py-2 font-bold">Cancel</button>}</div></form>
                   <div className="card p-4"><h3 className="font-extrabold">Institutions ({effInstList.length})</h3><div className="mt-3 space-y-2 max-h-[420px] overflow-auto">{WILAYAT_ORDER.map(w => { const items = effInstList.filter(e => e.wilayat === w); if (!items.length) return null; return <div key={w}><h4 className="font-bold">{w} — {items.length}</h4><div className="mt-1 space-y-1">{items.map(e => <div key={e.wilayat + e.institution} className="flex items-center gap-2 rounded border p-2 text-sm"><span className="font-bold [overflow-wrap:anywhere]">{e.institution}</span><span className="text-xs text-[var(--muted)]">{e.assignments.join(" · ")}</span><div className="ml-auto flex gap-1"><button type="button" onClick={() => { setEditingInst(e); setInstForm({ wilayat: e.wilayat, name: e.institution, assignments: [...e.assignments] }); }} className="rounded-full border px-2 py-1 text-xs font-bold">Edit</button><button type="button" onClick={() => deleteInstitution(e)} className="rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-bold text-red-600 hover:bg-red-100">Delete</button></div></div>)}</div></div>; })}</div></div>
                 </div>
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -1765,7 +1766,7 @@ export default function App() {
                         <input
                           value={auditorNameInput}
                           onChange={e => setAuditorNameInput(e.target.value)}
-                          placeholder="e.g. Salim Al Mamari"
+                          placeholder="e.g. Juma Al Marzouqi"
                           className={`mt-1 w-full ${!isNameValid(auditorNameInput) && auditorNameInput !== "" ? "border-red-500" : ""}`}
                           style={{ fontSize: 16, minHeight: 48 }}
                         />

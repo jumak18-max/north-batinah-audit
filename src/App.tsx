@@ -24,7 +24,7 @@ const INSTITUTIONS: Record<string, string[]> = {
   Saham: ["Saham Hospital", "Saham Polyclinic", "Hafeet HC", "Ghuwaisah HC", "Wadi Bani Omar HC", "Saham RMC"],
   Suwaiq: ["Suwaiq Hospital", "Suwaiq EHC", "Bidaya HC", "Khadhra HC", "Mashaiq HC", "Shireesa HC", "Tharmad HC", "Wadi Al Jahawer HC", "Suwaiq RMC"],
   Khaboorah: ["Khaboorah EHC", "Qasbia HC", "Wadi Hawasna Hospital", "Wadi Sarrami Hospital", "Wadi Shafan HC"],
-  Shinas: ["Shinas EHC", "Abu Baqra HC", "Shinas Labour Room", "Shinas RDC"],
+  Shinas: ["Shinas EHC", "Abu Baqra HC", "Shinas Labour Room", "Shinas RMC"],
   Liwa: ["Liwa HC", "Nabr HC", "Rahab HC"],
 };
 const TOPICS = ["Crash Cart", "Narcotics & Psychotropics", "Escorting Patients", "Death"];
@@ -34,13 +34,7 @@ MONTHS.forEach((m, i) => { MONTH_INDEX[m] = i; MONTH_INDEX[m.toLowerCase()] = i;
 const CATEGORIES = ["General Nursing", "Renal Medicine Center", "Labour Rooms"] as const;
 
 function cleanInstitutionName(raw: string, wilayat?: string): string {
-  let s = (raw || "").trim();
-  if (s === "Saham Hospital LR") return "Saham Hospital";
-  if (s === "Suwaiq Hospital LR") return "Suwaiq Hospital";
-  if (s === "Shinas RDC") return "Shinas RMC";
-  if (s.endsWith("_Saham Hospital LR")) return "Saham Hospital";
-  if (s.endsWith("_Suwaiq Hospital LR")) return "Suwaiq Hospital";
-  if (s.endsWith("_Shinas RDC")) return "Shinas RMC"; let changed = true;
+  let s = (raw || "").trim(); let changed = true;
   while (changed) { changed = false; const idx = s.indexOf("_"); if (idx > 0) { const prefix = s.slice(0, idx).trim(); const isWilayat = wilayat ? prefix.toLowerCase() === wilayat.toLowerCase() : WILAYAT_ORDER.some(w => w.toLowerCase() === prefix.toLowerCase()); if (isWilayat) { s = s.slice(idx + 1).trim(); changed = true; } } }
   return s;
 }
@@ -281,11 +275,11 @@ const DEFAULT_COMP_PLANS: CompPlan[] = [
   { id: "default-comp-Labour Rooms", category: "Labour Rooms", year: 2027, frequency: "Monthly", periods: [...MONTHS], procedures: ["[LR] Vaginal Examination", "[LR] Vaginal Examination", "[LR] 2nd Stage of Labour", "[LR] 2nd Stage of Labour", null, "[LR] 3rd Stage of Labour", "[LR] 3rd Stage of Labour", "[LR] Episiotomy Incision, Repair", "[LR] Breast Feeding Assessment", "Checking FHS (fetal heart sound)", null, null], feedback: [false, false, false, false, true, false, false, false, false, false, false, false], active: true },
 ];
 const DEFAULT_SCORES: Score[] = [
-  { id: "default-score-1", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Jan", score: "95", comment: "Crash cart checklist complete.", auditorName: "Juma Al Marzouqi", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
-  { id: "default-score-2", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Feb", score: "98", comment: "Minor labelling fixed on site.", auditorName: "Juma Al Marzouqi", auditedAt: "2026-11-22T04:10:00.000Z", history: [] },
+  { id: "default-score-1", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Jan", score: "95", comment: "Crash cart checklist complete.", auditorName: "Juma Al Maezouqi", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
+  { id: "default-score-2", planId: "default-plan-Crash Cart", wilayat: "Suhar", institution: "Suhar EHC", topic: "Crash Cart", year: 2027, period: "Feb", score: "98", comment: "Minor labelling fixed on site.", auditorName: "Juma Al Maezouqi", auditedAt: "2026-11-22T04:10:00.000Z", history: [] },
 ];
 const DEFAULT_COMP_SCORES: CompScore[] = [
-  { id: "default-comp-score-1", planId: "default-comp-General Nursing", wilayat: "Khaboorah", institution: "Khaboorah EHC", category: "General Nursing", year: 2027, period: "Jan", procedure: "Neourological assessment", score: "92", comment: "Good technique.", auditorName: "Juma Al Marzouqi", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
+  { id: "default-comp-score-1", planId: "default-comp-General Nursing", wilayat: "Khaboorah", institution: "Khaboorah EHC", category: "General Nursing", year: 2027, period: "Jan", procedure: "Neourological assessment", score: "92", comment: "Good technique.", auditorName: "Juma Al Maezouqi", auditedAt: "2026-11-22T03:42:00.000Z", history: [] },
 ];
 
 async function api(action: string, args: any) {
@@ -1491,7 +1485,7 @@ export default function App() {
                 <h2 className="text-xl font-extrabold">Sign in</h2><p className="text-sm text-[var(--muted)]">Choose account and type password.</p>
                 <form onSubmit={login} className="mt-4 space-y-3">
                   <label className="block text-sm font-bold">Username<input value={username} onChange={e => setUsername(e.target.value)} className="mt-1 w-full" autoComplete="username" /></label>
-                  <label className="block text-sm font-bold relative">Password<div className="relative mt-1"><input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} className="w-full pr-10" autoComplete="current-password" /><button type="button" onClick={() => setShowPassword(p => !p)} className="absolute right-2 top-1/2 -translate-y-1/2 text-lg" aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? "🙈" : "👁️"}</button></div></label>
+                  <label className="block text-sm font-bold">Password<div className="relative mt-1"><input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} className="w-full pr-12" autoComplete="current-password" /><button type="button" onClick={() => setShowPassword(p => !p)} className="absolute inset-y-0 right-0 w-10 flex items-center justify-center text-[18px] leading-none" aria-label={showPassword ? "Hide password" : "Show password"} tabIndex={-1}>{showPassword ? "🙈" : "👁️"}</button></div></label>
                   {security.locked && <label className="block text-sm font-bold">Recovery Code <span className="text-red-600">* Required for Master Unlock</span><input type="password" value={recoveryInput} onChange={e => setRecoveryInput(e.target.value)} className="mt-1 w-full" placeholder="Recovery Code set by Master" autoComplete="off" /></label>}
                   {security.accessCodeEnabled && <label className="block text-sm font-bold">Directorate Access Code <span className="text-red-600">* Required</span><input type="password" value={accessCodeInput} onChange={e => setAccessCodeInput(e.target.value)} className="mt-1 w-full" placeholder="Directorate Access Code" autoComplete="off" /></label>}
                   {loginError && <p className="rounded-lg bg-[var(--red)] p-2 text-sm font-semibold">{loginError}</p>}
@@ -1766,7 +1760,7 @@ export default function App() {
                         <input
                           value={auditorNameInput}
                           onChange={e => setAuditorNameInput(e.target.value)}
-                          placeholder="e.g. Juma Al Marzouqi"
+                          placeholder="e.g. Juma Al Maezouqi"
                           className={`mt-1 w-full ${!isNameValid(auditorNameInput) && auditorNameInput !== "" ? "border-red-500" : ""}`}
                           style={{ fontSize: 16, minHeight: 48 }}
                         />

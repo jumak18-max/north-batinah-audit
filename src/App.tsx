@@ -9,14 +9,14 @@ import { isSupabaseConfigured, supabaseLoadAll, supabaseUpsert, supabaseDelete, 
 type Role = "Master" | "Admin" | "Wilayat";
 type User = { username: string; password: string; role: Role; wilayat: string; label: string };
 const DEFAULT_USERS: User[] = [
-  { username: "master", password: "Masterin123", role: "Master", wilayat: "All Wilayats", label: "Master" },
-  { username: "admin", password: "admin123", role: "Admin", wilayat: "All Wilayats", label: "Admin — Nursing Service Department" },
-  { username: "suhar", password: "suhar123", role: "Wilayat", wilayat: "Suhar", label: "Suhar" },
-  { username: "saham", password: "saham123", role: "Wilayat", wilayat: "Saham", label: "Saham" },
-  { username: "khaboorah", password: "khaboorah123", role: "Wilayat", wilayat: "Khaboorah", label: "Khaboorah" },
-  { username: "suwaiq", password: "suwaiq123", role: "Wilayat", wilayat: "Suwaiq", label: "Suwaiq" },
-  { username: "shinas", password: "shinas123", role: "Wilayat", wilayat: "Shinas", label: "Shinas" },
-  { username: "liwa", password: "liwa123", role: "Wilayat", wilayat: "Liwa", label: "Liwa" },
+  { username: "Master", password: "Masterin123", role: "Master", wilayat: "All Wilayats", label: "Master" },
+  { username: "Admin", password: "nsd/35", role: "Admin", wilayat: "All Wilayats", label: "Admin — Nursing Service Department" },
+  { username: "Suhar", password: "shr&678", role: "Wilayat", wilayat: "Suhar", label: "Suhar" },
+  { username: "Saham", password: "shm:505", role: "Wilayat", wilayat: "Saham", label: "Saham" },
+  { username: "Khaboorah", password: "kbh*789", role: "Wilayat", wilayat: "Khaboorah", label: "Khaboorah" },
+  { username: "Suwaiq", password: "swq$696", role: "Wilayat", wilayat: "Suwaiq", label: "Suwaiq" },
+  { username: "Shinas", password: "sns#404", role: "Wilayat", wilayat: "Shinas", label: "Shinas" },
+  { username: "Liwa", password: "lwa@919", role: "Wilayat", wilayat: "Liwa", label: "Liwa" },
 ];
 const WILAYAT_ORDER = ["Suhar", "Saham", "Suwaiq", "Khaboorah", "Shinas", "Liwa"];
 const INSTITUTIONS: Record<string, string[]> = {

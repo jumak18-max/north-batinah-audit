@@ -1478,8 +1478,10 @@ export default function App() {
                 </div>
                 <div className="mt-6 text-sm text-white/85"><strong>Wilayats:</strong> {WILAYAT_ORDER.map(w => `${w} (${(effPart1[w] || []).length})`).join(" · ")}</div>
                 <div className="mt-4 rounded-xl bg-white/10 p-3 text-sm"><strong>Part 2 — Competency Procedures:</strong> General Nursing, Renal Medicine Centers, Labour Rooms. Same logins, separate plans and scores.</div>
-                <p className="mt-auto pt-6 text-center text-sm font-bold text-white">Brought to you by:</p>
-                <p className="mt-auto pt-6 text-center text-sm font-bold text-white">Juma Al Marzouqi [Saham Hospital]</p>
+                 <p className="mt-auto pt-6 text-center text-sm font-bold text-white">
+                Brought to you by: <br />
+                Juma Al Marzouqi [Saham Hospital]
+                 </p>
                 <p className="mt-3 text-center text-xs text-white/70">{isSupabaseConfigured ? "Live • Supabase • Shared Database" : "Local mode — add VITE_SUPABASE env to enable cross-PC sync"}</p>
               </div>
               <div className="p-5 sm:p-7">
